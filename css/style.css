@@ -468,22 +468,48 @@ body.clock-hidden #ui .sun * { pointer-events: none; }
 
 /* 快捷键列表 */
 .hints { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
-.hints-note {
-  margin: 2px 0 0;
+
+/* 工具快捷键提示：贴在工具条正下方、分页标签上方那条窄带里。
+   fixed 定位（脱离 #ui 的纵向 flex 流），只在白板模式下出现；
+   pointer-events: none —— 它压在画布上，绝不能挡住交互。 */
+.keys-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
   font-size: 10.5px;
   letter-spacing: .06em;
   color: var(--ink-faint);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  /* 只对 opacity 做过渡：visibility 是离散属性，放进过渡里会变成
+     "半程才翻转"，测量它的代码就有竞态（踩过）。 */
+  transition: opacity .45s var(--ease);
 }
-.hints-note kbd {
+body.mode-board .keys-hint { opacity: 1; visibility: visible; }
+.keys-hint kbd {
   font: inherit;
   font-size: 9.5px;
   min-width: 15px;
   padding: 1px 3px;
-  margin: 0 1px;
   text-align: center;
   border: 1px solid var(--line);
   border-radius: 4px;
   color: var(--ink-dim);
+  background: rgba(10, 18, 28, .5);
+}
+.keys-sep {
+  width: 1px;
+  height: 10px;
+  margin: 0 7px;
+  background: var(--line);
 }
 .hints button {
   appearance: none;
@@ -760,7 +786,8 @@ body.mode-board.tool-select #board-live { cursor: default; }
 #toolbar {
   position: fixed;
   left: 50%;
-  bottom: clamp(50px, 6vw, 62px);
+  /* 抬高一点，给下面那条快捷键提示留出呼吸空间 */
+  bottom: clamp(56px, 6vw, 70px);
   transform: translate(-50%, 140%);
   z-index: 7;
   display: flex;

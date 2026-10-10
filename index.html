@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#04070c">
 <meta name="description" content="flow — 一池水，一点声音，一块白板。为专注与捕捉想法而生。">
 <title>flow — 一池水，一点声音，一块白板</title>
-<link rel="stylesheet" href="css/style.css?v=10">
+<link rel="stylesheet" href="css/style.css?v=13">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23bcd6ff'/></svg>">
 </head>
 <body class="is-loading">
@@ -67,8 +67,14 @@
       <button type="button" data-act="mute"><kbd>M</kbd> 静音</button>
       <button type="button" data-act="hide"><kbd>H</kbd> 隐藏界面</button>
     </nav>
-    <p class="hints-note">白板内：<kbd>1</kbd>选择 <kbd>2</kbd>画笔 <kbd>3</kbd>橡皮 <kbd>4</kbd>文字</p>
   </div>
+
+  <!-- 工具快捷键提示：贴在工具条正下方（fixed 定位，脱离 #ui 的纵向 flex 流） -->
+  <p class="keys-hint" id="keys-hint" aria-hidden="true">
+    <kbd>1</kbd>选择 <kbd>2</kbd>画笔 <kbd>3</kbd>橡皮 <kbd>4</kbd>文字
+    <span class="keys-sep"></span>
+    <kbd>Shift</kbd>+<kbd>1</kbd>~<kbd>3</kbd> 颜色
+  </p>
 
   <!-- 湖面时间拨码：竖在页面最右端，上端凌晨、下端深夜。
        position: fixed 让它脱离 #ui 的纵向 flex 流，不会把顶部/底部两行挤开。 -->
@@ -191,15 +197,15 @@
 <!-- 错误提示条（同时用于自动化检查） -->
 <div id="err" role="alert" hidden></div>
 
-<script src="js/store.js?v=10" defer></script>
-<script src="js/camera.js?v=10" defer></script>
-<script src="js/geom.js?v=10" defer></script>
-<script src="js/sun.js?v=10" defer></script>
-<script src="js/water.js?v=10" defer></script>
-<script src="js/audio.js?v=10" defer></script>
-<script src="js/board.js?v=10" defer></script>
-<script src="js/blocks.js?v=10" defer></script>
-<script src="js/app.js?v=10" defer></script>
+<script src="js/store.js?v=13" defer></script>
+<script src="js/camera.js?v=13" defer></script>
+<script src="js/geom.js?v=13" defer></script>
+<script src="js/sun.js?v=13" defer></script>
+<script src="js/water.js?v=13" defer></script>
+<script src="js/audio.js?v=13" defer></script>
+<script src="js/board.js?v=13" defer></script>
+<script src="js/blocks.js?v=13" defer></script>
+<script src="js/app.js?v=13" defer></script>
 <input type="file" id="file-input" accept=".json,.excalidraw,application/json" hidden>
 </body>
 </html>

@@ -1625,6 +1625,29 @@
       out.shift3Ink = board.getInk();
       setInk(0);
 
+      /* 快捷键提示的位置自检：必须在工具条下方、分页标签上方，三者不重叠。
+
+         这里**不能**用 getBoundingClientRect 比较：工具条是靠 CSS 过渡从屏外
+         滑上来的，setMode('board') 之后立刻测量拿到的是过渡起点的旧位置
+         （一度算出 -53px 的假重叠）。改用不参与过渡的 bottom 计算值来算，
+         全部以「距视口底部」为基准，与过渡和 rAF 都无关。 */
+      var hintEl = $('keys-hint');
+      var sheetsEl = $('sheets');
+      if (hintEl && toolbar && sheetsEl) {
+        setMode('board');
+        out.hintInBoardMode = document.body.classList.contains('mode-board');
+        var hb = parseFloat(getComputedStyle(hintEl).bottom) || 0;   // 提示下边缘距底
+        var hh = hintEl.offsetHeight;
+        var tb = parseFloat(getComputedStyle(toolbar).bottom) || 0;  // 工具条下边缘距底
+        var sb = sheetsEl.offsetHeight;                              // 分页标签高度
+        out.hintGapAbove = Math.round(tb - (hb + hh));   // >0 = 提示上边缘在工具条下方
+        out.hintGapBelow = Math.round(hb - sb);          // >0 = 提示下边缘在标签上方
+        out.hintBelowToolbar = out.hintGapAbove > 0;
+        out.hintAboveSheets = out.hintGapBelow > 0;
+        out.hintShownInBoard = getComputedStyle(hintEl).visibility === 'visible';
+        out.hintPointerNone = getComputedStyle(hintEl).pointerEvents === 'none';
+      }
+
       /* 连线可见性自检：SVG 的裁剪区域必须恒等于窗口。
          如果相机变换打在 <svg> 元素上，元素视口会被一起缩放——
          缩小时裁剪区域小于窗口，连线就只剩中间一段可见（真实踩过，已用最小
