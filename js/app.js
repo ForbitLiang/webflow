@@ -57,7 +57,8 @@
   var exportMenu = $('export-menu');
   var sunPanel = $('sun-panel');
   var sunRange = $('sun-range');
-  var sunLabel = $('sun-label');
+  var sunTime = $('sun-time');
+  var sunPhase = $('sun-phase');
   var sunAuto = $('sun-auto');
 
   /* ── 子系统 ─────────────────────────────────────────────── */
@@ -366,16 +367,16 @@
 
     var P = Flow.Sun.palette(sun.current);
     if (sunRange) sunRange.value = String(minute);
-    if (sunLabel) {
-      sunLabel.textContent = sun.auto
-        ? P.name                                        // 自动时显示时段名（真实时间上面的大钟已经在报）
-        : Flow.Sun.formatHour(sun.current) + ' · ' + P.name;
-    }
+    if (sunTime) sunTime.textContent = Flow.Sun.formatHour(sun.current);
+    if (sunPhase) sunPhase.textContent = P.name;
     if (sunAuto) {
       sunAuto.classList.toggle('on', sun.auto);
       sunAuto.setAttribute('aria-pressed', sun.auto ? 'true' : 'false');
     }
-    if (sunPanel) sunPanel.title = '湖面时间 ' + Flow.Sun.formatHour(sun.current) + '（' + P.name + '）';
+    if (sunPanel) {
+      sunPanel.title = '湖面时间 ' + Flow.Sun.formatHour(sun.current) + '（' + P.name + '）' +
+        (sun.auto ? ' · 跟随当前时间' : ' · 手动锁定');
+    }
   }
 
   // 每帧推进（由 water 的 onFrame 调用，和渲染同一个节拍）
@@ -1373,9 +1374,40 @@
         out.toolbarBtns = document.querySelectorAll('#toolbar button').length;
       }
 
+      /* 时间拨码自检：形状必须是竖的，而且"拖动"要真的改变湖面时间。
+         之前出过"HTML 是新的、CSS/JS 是旧的"这种缓存错配，
+         表现就是拨码变成原生横条且拖不动——所以这两条必须断言。 */
+      if (sunRange) {
+        var sr = sunRange.getBoundingClientRect();
+        out.sliderW = Math.round(sr.width);
+        out.sliderH = Math.round(sr.height);
+        out.sliderVertical = sr.height > sr.width * 3;         // 竖的：高远大于宽
+        out.sliderStyled = getComputedStyle(sunRange).appearance === 'none' ||
+          getComputedStyle(sunRange).webkitAppearance === 'none';
+
+        setMode('water');                                      // 拨码只在水面下可见
+        setSunAuto(true, true);
+        out.autoBefore = sun.auto;
+        // 模拟用户拖动：设值 + 派发 input
+        sunRange.value = '360';                                // 06:00
+        sunRange.dispatchEvent(new Event('input', { bubbles: true }));
+        out.autoAfterDrag = sun.auto;                          // 拖动应切到手动
+        out.manualMin = sun.manualMin;
+        out.ariaAfterDrag = sunAuto ? sunAuto.getAttribute('aria-pressed') : '?';
+      }
+
       document.title = 'SELFCHECK ' + Object.keys(out).map(function (k) {
         return k + '=' + out[k];
       }).join(' ');
+
+      // 缓动需要时间，稍后再把"拖动后的最终状态"补进标题
+      setTimeout(function () {
+        var tail = ' dragTime=' + (sunTime ? sunTime.textContent : '?') +
+          ' dragPhase=' + (sunPhase ? sunPhase.textContent : '?') +
+          ' paletteHour=' + (Math.round(water.getPalette().hour * 100) / 100) +
+          ' sunHour=' + (Math.round(sun.current * 100) / 100);
+        document.title = document.title + tail;
+      }, 1400);
     } catch (err) {
       document.title = 'SELFCHECK_FAIL ' + ((err && err.message) || err);
     }
