@@ -34,7 +34,10 @@
     var widthIndex = 1;
     var dpr = 1;
     var cssW = 1, cssH = 1;
-    var undoFloor = strokes.length;      // 撤销不得低于此下标
+    var highlight = [];                  // 被选中的笔迹（虚线框高亮）
+    var drawEnabled = true;              // 选择工具下要关掉落笔
+    var undoStack = [];                  // 动作栈：add / del / move
+    var UNDO_MAX = 40;
 
     var api = {
       get strokes() { return strokes; },
@@ -123,6 +126,7 @@
       clearLayer(lctx);
       applyTransform(lctx);
       if (current) paintStroke(lctx, current);
+      drawHighlights(lctx);
     }
 
     /* 视图（缩放 / 平移）变化后重画 */
@@ -132,6 +136,88 @@
 
     function markDirty() {
       if (api.onChange) api.onChange();
+    }
+
+    /* ── 选择与整组平移（笔迹这一层） ─────────────────────── */
+
+    // 笔迹的包围盒（含线宽），世界坐标
+    function strokeRect(s) {
+      var G = window.Flow.Geom;
+      var r = G.rectOfPoints(s.p);
+      if (!r) return null;
+      var half = (s.w || 2) * (s.e ? 6 : 1) * 0.5 + 1;
+      return G.expand(r, half);
+    }
+
+    api.strokeRect = strokeRect;
+
+    /* 与框选矩形相交的笔迹 */
+    api.strokesInRect = function (rect) {
+      var G = window.Flow.Geom, out = [];
+      for (var i = 0; i < strokes.length; i++) {
+        var r = strokeRect(strokes[i]);
+        if (r && G.rectsIntersect(r, rect)) out.push(strokes[i]);
+      }
+      return out;
+    };
+
+    /* 某点落在哪条笔迹上（从后往前，后画的在上层） */
+    api.strokeAt = function (x, y, tol) {
+      var G = window.Flow.Geom;
+      tol = tol == null ? 6 : tol;
+      for (var i = strokes.length - 1; i >= 0; i--) {
+        var s = strokes[i];
+        if (s.e) continue;
+        var r = strokeRect(s);
+        if (!r || !G.pointInRect(G.expand(r, tol), x, y)) continue;
+        var reach = tol + (s.w || 2) * 0.5;
+        if (G.distToPolylineSq(x, y, s.p) <= reach * reach) return s;
+      }
+      return null;
+    };
+
+    /* 选中高亮：在 live 层画虚线框（那一层在 select 模式下是空闲的） */
+    api.setHighlight = function (list) {
+      highlight = list || [];
+      redraw();
+    };
+
+    /* 整组平移：以快照为基准做绝对偏移，避免逐帧累加产生漂移 */
+    api.snapshotStrokes = function (list) {
+      return (list || []).map(function (s) {
+        return {
+          s: s,
+          p: s.p.map(function (q) { return [q[0], q[1], q[2]]; })
+        };
+      });
+    };
+
+    api.applyStrokesOffset = function (snap, dx, dy) {
+      for (var i = 0; i < snap.length; i++) {
+        var rec = snap[i], src = rec.p, dst = rec.s.p;
+        for (var k = 0; k < dst.length; k++) {
+          dst[k][0] = src[k][0] + dx;
+          dst[k][1] = src[k][1] + dy;
+        }
+      }
+      redraw();
+    };
+
+    api.commitStrokes = function () { markDirty(); };
+
+    /* 画选中虚线框（世界坐标，跟着相机缩放） */
+    function drawHighlights(ctx) {
+      if (!highlight.length) return;
+      ctx.save();
+      ctx.setLineDash([7, 6]);
+      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = 'rgba(159, 196, 255, .9)';
+      for (var i = 0; i < highlight.length; i++) {
+        var r = strokeRect(highlight[i]);
+        if (!r) continue;
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+      }
+      ctx.restore();
     }
 
     api.paintInk = function (ctx) {
@@ -198,6 +284,8 @@
         applyTransform(bctx);
         paintStroke(bctx, current);
       }
+      // 登记一次可撤销的"新增"
+      pushUndoAction({ type: 'add', s: current });
       current = null;
       clearLayer(lctx);
       markDirty();
@@ -207,7 +295,7 @@
     var activeId = null;
 
     function onDown(e) {
-      if (!enabled || e.button > 1) return;
+      if (!enabled || !drawEnabled || e.button > 1) return;
       if (e.pointerType === 'touch' && e.isPrimary === false) return;
       activeId = e.pointerId;
       drawing = true;
@@ -218,7 +306,7 @@
     }
 
     function onMove(e) {
-      if (!enabled) return;
+      if (!enabled || !drawEnabled) return;
       if (!drawing || e.pointerId !== activeId) return;
       // getCoalescedEvents 对合成事件会返回空数组，这里必须兜底
       var coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
@@ -261,6 +349,17 @@
     api.setTool = function (t) { tool = t === 'eraser' ? 'eraser' : 'pen'; return tool; };
     api.getTool = function () { return tool; };
 
+    /* 选择工具下关掉落笔：画布仍然接收事件（用于框选），但不再画线 */
+    api.setDrawEnabled = function (v) {
+      drawEnabled = !!v;
+      if (!drawEnabled) {
+        if (drawing) { drawing = false; activeId = null; endStroke(); }
+        if (current) { current = null; clearLayer(lctx); }
+      }
+      return drawEnabled;
+    };
+    api.isDrawEnabled = function () { return drawEnabled; };
+
     api.setInk = function (i) { inkIndex = clamp(i | 0, 0, INKS.length - 1); return inkIndex; };
     api.getInk = function () { return inkIndex; };
 
@@ -270,34 +369,86 @@
     };
     api.getWidth = function () { return WIDTHS[widthIndex]; };
 
-    /* 撤销下限：防止撤销"穿透"到上一页（或本次会话之前）的笔迹。
-       换页 / 载入 / 导入时把地板抬到当前笔数。 */
+    /* ── 撤销：动作栈 ─────────────────────────────────────────
+       原来是"弹出最后一笔"，只能撤销画笔；一旦支持多选删除和整组平移，
+       那种做法就撤不了任意位置的删除、也撤不了移动。
+       改成记录动作：add / del / move，各自带足够的信息回滚。
+       换页、导入、清空会清栈（跨页撤销没有意义）。
+       ──────────────────────────────────────────────────────── */
+
+    function pushUndoAction(a) {
+      undoStack.push(a);
+      if (undoStack.length > UNDO_MAX) undoStack.shift();
+    }
+
     api.undo = function () {
-      if (strokes.length <= undoFloor) return false;
-      strokes.pop();
+      var a = undoStack.pop();
+      if (!a) return false;
+      if (a.type === 'add') {
+        var i = strokes.indexOf(a.s);
+        if (i >= 0) strokes.splice(i, 1);
+      } else if (a.type === 'del') {
+        // 按原下标插回，保持层次顺序
+        a.items.slice().sort(function (x, y) { return x.i - y.i; }).forEach(function (it) {
+          strokes.splice(Math.min(it.i, strokes.length), 0, it.s);
+        });
+      } else if (a.type === 'move') {
+        a.items.forEach(function (it) {
+          for (var k = 0; k < it.s.p.length; k++) {
+            it.s.p[k][0] = it.p[k][0];
+            it.s.p[k][1] = it.p[k][1];
+          }
+        });
+      }
       redraw();
       markDirty();
       return true;
     };
 
-    api.setUndoFloor = function () { undoFloor = strokes.length; };
-    api.undoDepth = function () { return Math.max(0, strokes.length - undoFloor); };
+    api.undoDepth = function () { return undoStack.length; };
+
+    /* 整组平移结束后登记一次可撤销的移动 */
+    api.pushMoveUndo = function (snap) {
+      if (!snap || !snap.length) return;
+      pushUndoAction({
+        type: 'move',
+        items: snap.map(function (r) { return { s: r.s, p: r.p }; })
+      });
+    };
+
+    /* 删除指定的若干笔迹（可撤销） */
+    api.removeStrokes = function (list) {
+      if (!list || !list.length) return 0;
+      var items = [];
+      for (var i = strokes.length - 1; i >= 0; i--) {
+        var idx = list.indexOf(strokes[i]);
+        if (idx >= 0) { items.push({ s: strokes[i], i: i }); strokes.splice(i, 1); }
+      }
+      if (!items.length) return 0;
+      pushUndoAction({ type: 'del', items: items });
+      highlight = highlight.filter(function (s) { return list.indexOf(s) < 0; });
+      redraw();
+      markDirty();
+      return items.length;
+    };
 
     api.clear = function () {
       if (!strokes.length) return false;
       strokes.length = 0;
+      undoStack.length = 0;      // 清空是"不可撤销"的（界面上也这么提示）
+      highlight = [];
       redraw();
       markDirty();
       return true;
     };
 
-    /* 整体替换笔迹（换页 / 导入用）。替换后把撤销地板抬到当前笔数，
-       否则在新一页上按撤销会一路删到上一页的内容。 */
+    /* 整体替换笔迹（换页 / 导入用）。跨页撤销没有意义，直接清栈。 */
     api.replaceStrokes = function (list) {
       strokes.length = 0;
       (list || []).forEach(function (s) { strokes.push(s); });
       current = null;
-      undoFloor = strokes.length;
+      undoStack.length = 0;
+      highlight = [];
       redraw();
       markDirty();
     };

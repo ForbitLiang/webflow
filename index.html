@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#04070c">
 <meta name="description" content="flow — 一池水，一点声音，一块白板。为专注与捕捉想法而生。">
 <title>flow — 一池水，一点声音，一块白板</title>
-<link rel="stylesheet" href="css/style.css?v=7">
+<link rel="stylesheet" href="css/style.css?v=8">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23bcd6ff'/></svg>">
 </head>
 <body class="is-loading">
@@ -102,11 +102,17 @@
 
 </div>
 
+<!-- 框选矩形（选择工具下拖拽时出现） -->
+<div id="marquee" aria-hidden="true"></div>
+
 <!-- ── 分页标签（像 Excel 的 sheet） ──────────────────────────── -->
 <div id="sheets" role="tablist" aria-label="白板分页"></div>
 
 <!-- ── 白板工具条 ───────────────────────────────────────────── -->
 <div id="toolbar" role="toolbar" aria-label="白板工具">
+  <button type="button" data-tool="select" title="选择 (V)：拖拽框选多个，可整组移动">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3l9.5 8.2-4.2.5 2.2 4.6-1.9.9-2.2-4.6-3 3z"/></svg><span>选择</span>
+  </button>
   <button type="button" data-tool="pen" class="on" title="画笔 (P)">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16l1-3.5L13 4.5l2.5 2.5L7.5 15 4 16z"/></svg><span>画笔</span>
   </button>
@@ -179,14 +185,15 @@
 <!-- 错误提示条（同时用于自动化检查） -->
 <div id="err" role="alert" hidden></div>
 
-<script src="js/store.js?v=7" defer></script>
-<script src="js/camera.js?v=7" defer></script>
-<script src="js/sun.js?v=7" defer></script>
-<script src="js/water.js?v=7" defer></script>
-<script src="js/audio.js?v=7" defer></script>
-<script src="js/board.js?v=7" defer></script>
-<script src="js/blocks.js?v=7" defer></script>
-<script src="js/app.js?v=7" defer></script>
+<script src="js/store.js?v=8" defer></script>
+<script src="js/camera.js?v=8" defer></script>
+<script src="js/geom.js?v=8" defer></script>
+<script src="js/sun.js?v=8" defer></script>
+<script src="js/water.js?v=8" defer></script>
+<script src="js/audio.js?v=8" defer></script>
+<script src="js/board.js?v=8" defer></script>
+<script src="js/blocks.js?v=8" defer></script>
+<script src="js/app.js?v=8" defer></script>
 <input type="file" id="file-input" accept=".json,.excalidraw,application/json" hidden>
 </body>
 </html>

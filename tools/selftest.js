@@ -60,10 +60,12 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root, 'js/store.js'), 'utf8'), sandbox, { filename: 'store.js' });
 vm.runInContext(fs.readFileSync(path.join(root, 'js/camera.js'), 'utf8'), sandbox, { filename: 'camera.js' });
 vm.runInContext(fs.readFileSync(path.join(root, 'js/sun.js'), 'utf8'), sandbox, { filename: 'sun.js' });
+vm.runInContext(fs.readFileSync(path.join(root, 'js/geom.js'), 'utf8'), sandbox, { filename: 'geom.js' });
 
 const S = sandbox.window.Flow.Store;
 const Cam = sandbox.window.Flow.Camera;
 const Sun = sandbox.window.Flow.Sun;
+const G = sandbox.window.Flow.Geom;
 
 /* ── 断言 ────────────────────────────────────────────────── */
 
@@ -611,6 +613,89 @@ ok('每个关键帧字段齐全', K.every(k =>
   typeof k.elev === 'number' && typeof k.glint === 'number' &&
   typeof k.sheen === 'number' && typeof k.amb === 'number' &&
   typeof k.vig === 'number' && typeof k.far === 'number' && typeof k.path === 'number'));
+
+/* ── 14. 框选与命中测试的几何 ───────────────────────────── */
+
+console.log('\n[14] 框选几何');
+
+// 包围盒
+const box = G.rectOfPoints([[10, 20], [50, 5], [30, 60]]);
+ok('包围盒正确', box.x === 10 && box.y === 5 && box.w === 40 && box.h === 55, JSON.stringify(box));
+ok('空点集返回 null', G.rectOfPoints([]) === null && G.rectOfPoints(null) === null);
+ok('忽略非法坐标', (() => {
+  const r = G.rectOfPoints([[0, 0], [NaN, 5], [10, 10], ['x', 2]]);
+  return r.x === 0 && r.y === 0 && r.w === 10 && r.h === 10;
+})(), JSON.stringify(G.rectOfPoints([[0, 0], [NaN, 5], [10, 10], ['x', 2]])));
+
+// 由两个角点规范化（往左上拖也要得到正宽高）
+const rev = G.rectFromCorners(100, 80, 20, 30);
+ok('反向拖拽得到正宽高', rev.x === 20 && rev.y === 30 && rev.w === 80 && rev.h === 50, JSON.stringify(rev));
+ok('同一角点得到零尺寸矩形', (() => {
+  const z = G.rectFromCorners(5, 5, 5, 5);
+  return z.w === 0 && z.h === 0;
+})());
+
+// 相交
+const A = { x: 0, y: 0, w: 10, h: 10 };
+ok('重叠 → 相交', G.rectsIntersect(A, { x: 5, y: 5, w: 10, h: 10 }));
+ok('分离 → 不相交', !G.rectsIntersect(A, { x: 20, y: 0, w: 5, h: 5 }));
+ok('仅边接触算相交（框选要能选到贴边的对象）',
+  G.rectsIntersect(A, { x: 10, y: 0, w: 5, h: 5 }));
+ok('被完全包住 → 相交', G.rectsIntersect(A, { x: 2, y: 2, w: 3, h: 3 }));
+ok('null 不崩', !G.rectsIntersect(A, null) && !G.rectsIntersect(null, A));
+
+// 包含 / 点在矩形内
+ok('包含判断正确',
+  G.rectContainsRect(A, { x: 2, y: 2, w: 3, h: 3 }) &&
+  !G.rectContainsRect(A, { x: 8, y: 8, w: 5, h: 5 }));
+ok('点在矩形内（含边界）',
+  G.pointInRect(A, 0, 0) && G.pointInRect(A, 10, 10) && !G.pointInRect(A, 10.1, 5));
+ok('expand 按边扩',
+  JSON.stringify(G.expand(A, 2)) === JSON.stringify({ x: -2, y: -2, w: 14, h: 14 }),
+  JSON.stringify(G.expand(A, 2)));
+ok('unionRect 合并',
+  JSON.stringify(G.unionRect(A, { x: 20, y: -5, w: 10, h: 10 })) ===
+  JSON.stringify({ x: 0, y: -5, w: 30, h: 15 }),
+  JSON.stringify(G.unionRect(A, { x: 20, y: -5, w: 10, h: 10 })));
+ok('unionRect 容忍 null',
+  JSON.stringify(G.unionRect(null, A)) === JSON.stringify(A));
+
+// 点到线段：命中笔迹/连线的基础
+ok('垂足落在段内', Math.abs(G.distToSegmentSq(5, 3, 0, 0, 10, 0) - 9) < 1e-9,
+  G.distToSegmentSq(5, 3, 0, 0, 10, 0));
+ok('垂足落在段外时取端点', Math.abs(G.distToSegmentSq(-4, 0, 0, 0, 10, 0) - 16) < 1e-9,
+  G.distToSegmentSq(-4, 0, 0, 0, 10, 0));
+ok('零长度线段不崩', Math.abs(G.distToSegmentSq(3, 4, 0, 0, 0, 0) - 25) < 1e-9);
+ok('折线取最短距离', Math.abs(G.distToPolylineSq(5, 2, [[0, 0], [10, 0], [10, 10]]) - 4) < 1e-9,
+  G.distToPolylineSq(5, 2, [[0, 0], [10, 0], [10, 10]]));
+ok('单点折线按点算', Math.abs(G.distToPolylineSq(3, 4, [[0, 0]]) - 25) < 1e-9);
+ok('空折线返回 Infinity', G.distToPolylineSq(1, 1, []) === Infinity);
+
+// 贝塞尔：连线命中
+const ca = { x: 0, y: 0 }, cc1 = { x: 50, y: 0 }, cc2 = { x: 50, y: 100 }, cb = { x: 100, y: 100 };
+ok('曲线端点精确', (() => {
+  const p0 = G.cubicAt(ca, cc1, cc2, cb, 0), p1 = G.cubicAt(ca, cc1, cc2, cb, 1);
+  return p0.x === 0 && p0.y === 0 && p1.x === 100 && p1.y === 100;
+})());
+ok('曲线中点对称', (() => {
+  const m = G.cubicAt(ca, cc1, cc2, cb, 0.5);
+  return Math.abs(m.x - 50) < 1e-9 && Math.abs(m.y - 50) < 1e-9;
+})(), JSON.stringify(G.cubicAt(ca, cc1, cc2, cb, 0.5)));
+ok('曲线上的点距曲线约 0', G.distToCubicSq(50, 50, ca, cc1, cc2, cb) < 0.5,
+  G.distToCubicSq(50, 50, ca, cc1, cc2, cb));
+ok('远离曲线的点距离很大', G.distToCubicSq(50, 300, ca, cc1, cc2, cb) > 10000,
+  G.distToCubicSq(50, 300, ca, cc1, cc2, cb));
+
+// 共享位移的夹取：保证整组都留在可视范围内
+const lim = G.clampSharedDelta([100, 200, 300], 0, 400);
+ok('共享位移上限由最靠右的对象决定', lim.max === 100, lim.max);
+ok('共享位移下限由最靠左的对象决定', lim.min === -100, lim.min);
+const lim2 = G.clampSharedDelta([0, 1000], 0, 400);
+ok('区间冲突时退化为单点（不产生非法区间）', lim2.min <= lim2.max, JSON.stringify(lim2));
+ok('空集合不崩', (() => {
+  const r = G.clampSharedDelta([], 0, 100);
+  return r.min <= r.max;
+})());
 
 /* ── 结果 ────────────────────────────────────────────────── */
 

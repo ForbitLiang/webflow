@@ -700,19 +700,26 @@
 
   /* ── 工具 ───────────────────────────────────────────────── */
 
+  var TOOL_BTNS = '#toolbar [data-tool="select"], #toolbar [data-tool="pen"], ' +
+                  '#toolbar [data-tool="eraser"], #toolbar [data-tool="text"]';
+
   function setTool(t, quiet) {
     tool = t;
     board.setTool(t === 'eraser' ? 'eraser' : 'pen');
+    // 选择工具下关掉落笔：画布仍然接收事件（用于框选），但不再画线
+    board.setDrawEnabled(t !== 'select');
     blocks.setTool(t);
     document.body.classList.toggle('tool-text', t === 'text');
-    document.querySelectorAll('#toolbar [data-tool="pen"], #toolbar [data-tool="eraser"], #toolbar [data-tool="text"]')
-      .forEach(function (b) {
-        b.classList.toggle('on', b.getAttribute('data-tool') === t);
-      });
+    document.body.classList.toggle('tool-select', t === 'select');
+    if (t !== 'select') hideMarquee();
+    document.querySelectorAll(TOOL_BTNS).forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-tool') === t);
+    });
     if (quiet) return;
     showStatus(t === 'eraser' ? '橡皮'
       : t === 'text' ? '文字块 · 点空白处新建，拖动可移动，从右侧圆点拖出连线'
-      : '画笔', t === 'text' ? 4200 : 2200);
+      : t === 'select' ? '选择 · 拖拽框选多个，Shift 点选加/减，拖动任一选中项整组移动'
+      : '画笔', (t === 'text' || t === 'select') ? 4400 : 2200);
   }
 
   function setInk(i) {
@@ -730,6 +737,180 @@
     if (board.undo()) { showStatus('撤销'); return; }
     showStatus('没有可撤销的了');
   }
+
+  /* ── 框选与整组移动（选择工具） ─────────────────────────────
+     三类对象的选中状态放在一处：
+       · 字块 / 连线 → blocks 内部的 sel 集合
+       · 笔迹       → 这里用对象引用列表（笔迹没有 id）
+     拖动时两边用同一份"起点快照 + 绝对偏移"，所以不会漂移。
+     ──────────────────────────────────────────────────────── */
+
+  var marqueeEl = $('marquee');
+  var marquee = null;          // {x0,y0,x1,y1} 场景坐标
+  var strokeSel = [];          // 选中的笔迹对象
+  var moveSnap = null;         // 笔迹起点快照
+  var moveOrigin = null;       // {x,y} 手势起点（场景坐标）
+
+  function sceneX(e) { return camera.toSceneX(e.clientX); }
+  function sceneY(e) { return camera.toSceneY(e.clientY); }
+
+  function showMarquee() {
+    if (!marqueeEl) return;
+    marqueeEl.classList.add('on');
+  }
+  function hideMarquee() {
+    if (!marqueeEl) return;
+    marqueeEl.classList.remove('on');
+  }
+
+  function updateMarqueeBox() {
+    if (!marqueeEl || !marquee) return;
+    var x0 = camera.toScreenX(Math.min(marquee.x0, marquee.x1));
+    var y0 = camera.toScreenY(Math.min(marquee.y0, marquee.y1));
+    var x1 = camera.toScreenX(Math.max(marquee.x0, marquee.x1));
+    var y1 = camera.toScreenY(Math.max(marquee.y0, marquee.y1));
+    marqueeEl.style.left = Math.round(x0) + 'px';
+    marqueeEl.style.top = Math.round(y0) + 'px';
+    marqueeEl.style.width = Math.round(x1 - x0) + 'px';
+    marqueeEl.style.height = Math.round(y1 - y0) + 'px';
+  }
+
+  // 把当前框内的对象同步成选区（拖拽过程中实时预览）
+  function applyMarqueeSelection(additive) {
+    if (!marquee) return;
+    var rect = Flow.Geom.rectFromCorners(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+    var hit = blocks.hitTestRect(rect);
+    var strokes = board.strokesInRect(rect);
+
+    if (!additive) {
+      blocks.clearSelection();
+      strokeSel = [];
+    }
+    hit.blocks.forEach(function (id) { if (!blocks.isSelected('block', id)) blocks.toggleSelection('block', id); });
+    hit.edges.forEach(function (id) { if (!blocks.isSelected('edge', id)) blocks.toggleSelection('edge', id); });
+    strokes.forEach(function (s) { if (strokeSel.indexOf(s) < 0) strokeSel.push(s); });
+
+    blocks.render();
+    board.setHighlight(strokeSel);
+    updateSelectionStatus();
+  }
+
+  function clearSelection() {
+    blocks.clearSelection();
+    strokeSel = [];
+    board.setHighlight([]);
+  }
+
+  function updateSelectionStatus() {
+    var n = blocks.selectionCount() + strokeSel.length;
+    if (!n) return;
+    showStatus('已选 ' + n + ' 项' +
+      (blocks.selectedBlockIds().length ? '（字块 ' + blocks.selectedBlockIds().length + '）' : '') +
+      (strokeSel.length ? '（笔迹 ' + strokeSel.length + '）' : ''), 1400);
+  }
+
+  /* 拖动开始时记下笔迹的起点 */
+  function beginGroupMove() {
+    moveSnap = board.snapshotStrokes(strokeSel);
+    blocks.beginMove();
+    moveOrigin = null;
+  }
+
+  function applyGroupMove(dx, dy) {
+    if (moveSnap) board.applyStrokesOffset(moveSnap, dx, dy);
+    blocks.moveBy(dx, dy);
+  }
+
+  function endGroupMove(moved) {
+    if (moved) {
+      board.pushMoveUndo(moveSnap);     // 整组平移登记成一次可撤销的移动
+      board.commitStrokes();
+    }
+    blocks.endMove();
+    moveSnap = null;
+    moveOrigin = null;
+  }
+
+  function selectAll() {
+    if (state !== 'board') return;
+    var n = blocks.selectAll();
+    strokeSel = board.getStrokes().filter(function (s) { return !s.e; });
+    board.setHighlight(strokeSel);
+    var total = n + strokeSel.length;
+    showStatus(total ? '已全选 ' + total + ' 项' : '这一页是空的');
+  }
+
+  /* 字块那边发起的整组拖动 → 这里同步移动笔迹 */
+  blocks.onGroupMove = function (phase, dx, dy) {
+    if (phase === 'start') beginGroupMove();
+    else if (phase === 'move') { if (moveSnap) board.applyStrokesOffset(moveSnap, dx, dy); }
+    else endGroupMove(true);
+  };
+
+  /* 选择工具下，画布上的按下可能是"框选"也可能是"抓住选中的笔迹拖动" */
+  function onCanvasDown(e) {
+    if (state !== 'board' || tool !== 'select') return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    var sx = sceneX(e), sy = sceneY(e);
+
+    // 1) 命中已选中的笔迹 → 整组拖动（字块也会跟着走）
+    var grabbed = null;
+    for (var i = strokeSel.length - 1; i >= 0; i--) {
+      var r = board.strokeRect(strokeSel[i]);
+      if (r && Flow.Geom.pointInRect(Flow.Geom.expand(r, 6), sx, sy)) { grabbed = strokeSel[i]; break; }
+    }
+    if (grabbed) {
+      moveOrigin = { x: sx, y: sy };
+      beginGroupMove();
+      marquee = null;
+      try { boardLive.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+      return;
+    }
+
+    // 2) 否则开始框选
+    marquee = { x0: sx, y0: sy, x1: sx, y1: sy };
+    marquee.additive = !!e.shiftKey;
+    if (!e.shiftKey) clearSelection();
+    showMarquee();
+    updateMarqueeBox();
+    try { boardLive.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  }
+
+  function onCanvasMove(e) {
+    if (state !== 'board' || tool !== 'select') return;
+    if (moveOrigin) {
+      var dx = sceneX(e) - moveOrigin.x;
+      var dy = sceneY(e) - moveOrigin.y;
+      var d = blocks.clampMove(dx, dy);
+      applyGroupMove(d.dx, d.dy);
+      return;
+    }
+    if (!marquee) return;
+    marquee.x1 = sceneX(e);
+    marquee.y1 = sceneY(e);
+    updateMarqueeBox();
+    applyMarqueeSelection(marquee.additive);
+  }
+
+  function onCanvasUp(e) {
+    if (moveOrigin) {
+      endGroupMove(true);
+      updateSelectionStatus();
+      return;
+    }
+    if (!marquee) return;
+    var wasTiny = Math.abs(marquee.x1 - marquee.x0) < 3 && Math.abs(marquee.y1 - marquee.y0) < 3;
+    marquee = null;
+    hideMarquee();
+    if (wasTiny) clearSelection();       // 只是点了一下空白 → 取消选中
+  }
+
+  boardLive.addEventListener('pointerdown', onCanvasDown);
+  window.addEventListener('pointermove', onCanvasMove, { passive: true });
+  window.addEventListener('pointerup', onCanvasUp);
+  window.addEventListener('pointercancel', onCanvasUp);
 
   function download(name, data, mime) {
     Flow.Store.download(name, data, mime);
@@ -969,6 +1150,9 @@
       if (ink !== null) { setInk(Number(ink)); return; }
 
       switch (act) {
+        case 'select':
+          setTool('select');
+          break;
         case 'pen':
           if (tool === 'pen') {
             var w = board.cycleWidth();
@@ -1050,6 +1234,7 @@
     if (e.ctrlKey || e.metaKey) {
       if (state !== 'board') return;
       if (k === 'z') { doUndo(); e.preventDefault(); return; }
+      if (k === 'a') { selectAll(); e.preventDefault(); return; }   // 全选（否则会被浏览器选走文字）
       if (k === '=' || k === '+') { camera.zoomCenter(1.25, vw, vh); e.preventDefault(); return; }
       if (k === '-') { camera.zoomCenter(1 / 1.25, vw, vh); e.preventDefault(); return; }
       if (k === '0') { camera.reset(); e.preventDefault(); return; }
@@ -1073,15 +1258,17 @@
       case 'b': toggleMode(); e.preventDefault(); break;
       case 'escape':
         if (isExportMenuOpen()) { closeExportMenu(); }
-        else if (blocks.hasSelection()) { blocks.clearSelection(); }
+        else if (blocks.hasSelection() || strokeSel.length) { clearSelection(); }
         else if (state === 'board') { setMode('water'); }
         e.preventDefault();
         break;
       case 'delete':
       case 'backspace':
-        if (state === 'board' && blocks.hasSelection()) {
-          blocks.deleteSelected();
-          showStatus('已删除');
+        if (state === 'board' && (blocks.hasSelection() || strokeSel.length)) {
+          var removed = blocks.deleteSelected();
+          var ns = strokeSel.length ? board.removeStrokes(strokeSel) : 0;
+          clearSelection();
+          showStatus('已删除 ' + (removed + ns) + ' 项（可 Ctrl+Z 撤销）');
           e.preventDefault();
         }
         break;
@@ -1094,10 +1281,14 @@
         e.preventDefault();
         break;
       case 's': cyclePreset(); e.preventDefault(); break;
+      case 'v': if (state === 'board') setTool('select'); break;
       case 'p': if (state === 'board') setTool('pen'); break;
       case 'e': if (state === 'board') setTool('eraser'); break;
       case 'x': if (state === 'board') setTool('text'); break;
       case 'u': if (state === 'board') doUndo(); break;
+      case 'a':
+        if (state === 'board') { selectAll(); e.preventDefault(); }
+        break;
       case '0': if (state === 'board') { camera.reset(); showStatus('视图已重置为 100%'); } break;
       case '-': case '_':
         if (state === 'board') { camera.zoomCenter(1 / 1.25, vw, vh); e.preventDefault(); }
@@ -1229,6 +1420,40 @@
       flushSave();
       setTimeout(fitView, 60);
       showStatus('演示：' + sheets.length + ' 页，当前「' + sheets[active].name + '」', 6000);
+    }, 300);
+  }
+
+  /* 深链：?select=1 演示框选效果（选中若干字块与笔迹，并画出框选矩形） */
+  if (params.get('select') === '1') {
+    setMode('board');
+    setTool('pen', true);          // 先用画笔把那一笔合成出来（选择工具下是画不了的）
+    setTimeout(function () {
+      function sev(type, x, y) {
+        return new PointerEvent(type, {
+          clientX: x, clientY: y, pointerId: 9, isPrimary: true,
+          pressure: 0.6, bubbles: true, cancelable: true, pointerType: 'pen'
+        });
+      }
+      var cx = Math.round(window.innerWidth / 2), cy = Math.round(window.innerHeight / 2);
+      [[-260, 120], [-170, 60], [-80, 130], [10, 70]].forEach(function (p, i, arr) {
+        if (i === 0) boardLive.dispatchEvent(sev('pointerdown', cx + p[0], cy + p[1]));
+        else boardLive.dispatchEvent(sev('pointermove', cx + p[0], cy + p[1]));
+        if (i === arr.length - 1) boardLive.dispatchEvent(sev('pointerup', cx + p[0], cy + p[1]));
+      });
+
+      setTool('select', true);     // 再切到选择工具
+      var b1 = blocks.addBlock(cx - 150, cy - 90, '被框选中的块');
+      var b2 = blocks.addBlock(cx + 120, cy - 40, '一起移动');
+      blocks.addEdge(b1.id, b2.id);
+      blocks.selectAll();
+      strokeSel = board.getStrokes().slice();
+      board.setHighlight(strokeSel);
+      blocks.render();
+
+      marquee = { x0: cx - 330, y0: cy - 200, x1: cx + 300, y1: cy + 210 };
+      updateMarqueeBox();
+      showMarquee();
+      showStatus('框选演示：' + (blocks.selectionCount() + strokeSel.length) + ' 项被选中', 8000);
     }, 300);
   }
 
@@ -1373,6 +1598,59 @@
         out.expandedAfter = exportBtn.getAttribute('aria-expanded');
         out.toolbarBtns = document.querySelectorAll('#toolbar button').length;
       }
+
+      /* 框选 + 整组移动自检：走真实代码路径（合成指针事件 + 直接调 API 各验一半） */
+      setMode('board');
+      setTool('select', true);
+      var bA = blocks.addBlock(400, 300, 'A');
+      var bB = blocks.addBlock(520, 320, 'B');
+      var bC = blocks.addBlock(1200, 900, 'C');       // 故意放在框外
+      blocks.render();
+
+      // ① 框选：用合成指针事件在画布上拖一个矩形
+      function pev(type, x, y) {
+        return new PointerEvent(type, {
+          clientX: x, clientY: y, pointerId: 7, isPrimary: true, button: 0,
+          bubbles: true, cancelable: true, pointerType: 'mouse'
+        });
+      }
+      var m0 = { x: camera.toScreenX(340), y: camera.toScreenY(240) };
+      var m1 = { x: camera.toScreenX(600), y: camera.toScreenY(400) };
+      boardLive.dispatchEvent(pev('pointerdown', m0.x, m0.y));
+      window.dispatchEvent(pev('pointermove', (m0.x + m1.x) / 2, (m0.y + m1.y) / 2));
+      window.dispatchEvent(pev('pointermove', m1.x, m1.y));
+      out.marqueeVisible = !!(marqueeEl && marqueeEl.classList.contains('on'));
+      window.dispatchEvent(pev('pointerup', m1.x, m1.y));
+      out.marqueeClosed = !(marqueeEl && marqueeEl.classList.contains('on'));
+      out.selBlocks = blocks.selectionCount();
+      out.selIds = blocks.selectedBlockIds().sort().join(',');
+      out.pickedAB = blocks.isSelected('block', bA.id) && blocks.isSelected('block', bB.id);
+      out.excludedC = !blocks.isSelected('block', bC.id);
+
+      // ② 整组移动：直接调 blocks 的移动 API（等价于拖动其中一块）
+      var before = { ax: bA.x, ay: bA.y, bx: bB.x, by: bB.y };
+      blocks.beginMove();
+      var d = blocks.clampMove(60, 40);
+      blocks.moveBy(d.dx, d.dy);
+      blocks.endMove();
+      out.moveDX = Math.round(bA.x - before.ax);
+      out.moveDY = Math.round(bA.y - before.ay);
+      out.relativeKept = Math.round((bB.x - bA.x) - (before.bx - before.ax)) === 0;
+
+      // ③ 笔迹框选与高亮
+      strokeSel = board.getStrokes().slice();
+      board.setHighlight(strokeSel);
+      out.hlStrokes = strokeSel.length;
+
+      // ④ 删除选中（可撤销）
+      var undoBefore = board.undoDepth();
+      var delCount = board.removeStrokes(strokeSel);
+      out.deleted = delCount;
+      out.afterDelRows = board.count();
+      board.undo();
+      out.afterUndoRows = board.count();
+      out.undoWorked = board.count() > 0;
+      clearSelection();
 
       /* 时间拨码自检：形状必须是竖的，而且"拖动"要真的改变湖面时间。
          之前出过"HTML 是新的、CSS/JS 是旧的"这种缓存错配，

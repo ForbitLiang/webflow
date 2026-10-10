@@ -167,8 +167,10 @@ body.mode-board #nodes { opacity: 1; }
 }
 .node:hover { border-color: rgba(214, 232, 255, .8); }
 .node.sel {
-  border-color: rgba(214, 232, 255, .95);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .42), 0 0 0 3px rgba(159, 196, 255, .16);
+  border-color: rgba(214, 232, 255, .98);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .42),
+              0 0 0 4px rgba(159, 196, 255, .22),
+              0 0 18px rgba(159, 196, 255, .28);
 }
 .node.editing {
   cursor: text;
@@ -666,6 +668,21 @@ body.mode-board #sheets {
   background: rgba(159, 196, 255, .14);
   border-color: rgba(190, 215, 255, .4);
 }
+
+/* ── 框选矩形 ─────────────────────────────────────────────── */
+#marquee {
+  position: fixed;
+  z-index: 5;
+  display: none;
+  border: 1px dashed rgba(159, 196, 255, .85);
+  background: rgba(159, 196, 255, .10);
+  border-radius: 2px;
+  pointer-events: none;
+}
+#marquee.on { display: block; }
+
+/* 选择工具下：指针是箭头，画布上的笔迹可以整组拖动 */
+body.mode-board.tool-select #board-live { cursor: default; }
 
 /* ── 导出菜单（从「导出」按钮弹出） ───────────────────────── */
 #export-menu {

@@ -47,7 +47,7 @@
     var enabled = false;
     var tool = 'pen';
     var colorIndex = 0;
-    var selected = null;               // {type:'block'|'edge', id}
+    var sel = { blocks: {}, edges: {} };   // 多选集合：id -> true
     var editingId = null;
     var drag = null;                   // {id, ox, oy, moved, before}
     var linking = null;                // {from, x, y}
@@ -55,7 +55,7 @@
     var undoStack = [];
     var UNDO_MAX = 60;
 
-    var api = { onChange: null };
+    var api = { onChange: null, onGroupMove: null };
 
     /* ── 撤销（结构级：字块与连线） ───────────────────────────
        笔迹的撤销由 board.js 自己管；这里只管结构变更。
@@ -78,7 +78,7 @@
       try { obj = JSON.parse(str); } catch (e) { return false; }
       blocks = obj.b || [];
       edges = obj.e || [];
-      selected = null;
+      selClear();
       editingId = null;
       render();
       changed();
@@ -190,7 +190,20 @@
         if (editingId === b.id) return;                       // 编辑中：正常选文字
         if (e.target === handle) { startLink(e, b); return; }
         if (e.pointerType === 'mouse' && e.button !== 0) return;
-        select('block', b.id);
+
+        if (e.shiftKey) {
+          // Shift 点击：加入 / 移出选区。移出时不启动拖动，避免误移
+          var wasSelected = selHas('block', b.id);
+          selAddOrToggle('block', b.id);
+          render();
+          if (wasSelected) { e.preventDefault(); e.stopPropagation(); return; }
+        } else if (!selHas('block', b.id)) {
+          // 点未选中的块：单选它（替换选区）
+          select('block', b.id);
+        }
+        // 点已选中的块：保持整个选区，开始整组拖动
+
+        beginMove();
         drag = {
           id: b.id,
           ox: b.x - screenX(e),
@@ -199,6 +212,7 @@
           before: snapshot()
         };
         el.classList.add('dragging');
+        if (api.onGroupMove) api.onGroupMove('start', 0, 0);
         try { el.setPointerCapture(e.pointerId); } catch (err) {}
         e.preventDefault();
         e.stopPropagation();
@@ -270,7 +284,7 @@
           var t = el.querySelector('.node-text');
           if (t.textContent !== b.text) t.textContent = b.text;
         }
-        el.classList.toggle('sel', !!(selected && selected.type === 'block' && selected.id === b.id));
+        el.classList.toggle('sel', !!sel.blocks[b.id]);
       }
       Object.keys(els).forEach(function (id) {
         if (!seen[id]) {
@@ -300,7 +314,9 @@
           (function (id) {
             g.hit.addEventListener('pointerdown', function (ev) {
               if (!enabled) return;
-              select('edge', id);
+              if (ev.shiftKey) selAddOrToggle('edge', id);
+              else select('edge', id);
+              render();
               ev.stopPropagation();
               ev.preventDefault();
             });
@@ -310,8 +326,7 @@
         }
         g.hit.setAttribute('d', geo.d);
         g.vis.setAttribute('d', geo.d);
-        g.vis.setAttribute('class',
-          (selected && selected.type === 'edge' && selected.id === e.id) ? 'sel' : '');
+        g.vis.setAttribute('class', sel.edges[e.id] ? 'sel' : '');
       }
       Object.keys(edgeEls).forEach(function (id) {
         if (!seen[id]) {
@@ -326,21 +341,150 @@
       if (api.onChange) api.onChange();
     }
 
-    /* ── 选中 ─────────────────────────────────────────────── */
+    /* ── 选中（多选：用对象当集合，id -> true） ─────────────── */
 
-    function select(type, id) {
-      selected = id ? { type: type, id: id } : null;
+    function selCount() {
+      return Object.keys(sel.blocks).length + Object.keys(sel.edges).length;
+    }
+    function selHas(type, id) {
+      return !!(type === 'block' ? sel.blocks[id] : sel.edges[id]);
+    }
+    function selAdd(type, id) {
+      if (!id) return;
+      if (type === 'block') sel.blocks[id] = true; else sel.edges[id] = true;
+    }
+    function selRemove(type, id) {
+      if (type === 'block') delete sel.blocks[id]; else delete sel.edges[id];
+    }
+    function selClear() {
+      sel.blocks = {};
+      sel.edges = {};
+    }
+    function selIds(type) {
+      return Object.keys(type === 'block' ? sel.blocks : sel.edges);
+    }
+
+    // Shift 点击用：已选则移出，未选则加入
+    function selAddOrToggle(type, id) {
+      if (selHas(type, id)) selRemove(type, id); else selAdd(type, id);
+    }
+
+    function select(type, id) {          // 单选（替换）
+      selClear();
+      selAdd(type, id);
       render();
     }
 
     api.clearSelection = function () {
-      if (!selected) return false;
-      selected = null;
+      if (!selCount()) return false;
+      selClear();
       render();
       return true;
     };
 
-    api.hasSelection = function () { return !!selected; };
+    api.hasSelection = function () { return selCount() > 0; };
+    api.selectionCount = function () { return selCount(); };
+    api.selectedBlockIds = function () { return selIds('block'); };
+    api.selectedEdgeIds = function () { return selIds('edge'); };
+    api.isSelected = function (type, id) { return selHas(type, id); };
+
+    api.toggleSelection = function (type, id) {
+      if (selHas(type, id)) selRemove(type, id); else selAdd(type, id);
+      render();
+    };
+
+    /* 框选：返回与该矩形相交的字块与连线（连线用曲线包围盒近似） */
+    api.hitTestRect = function (rect) {
+      var G = window.Flow.Geom;
+      var out = { blocks: [], edges: [] };
+      blocks.forEach(function (b) {
+        var r = rectOf(b);
+        var box = { x: r.cx - r.w / 2, y: r.cy - r.h / 2, w: r.w, h: r.h };
+        if (G.rectsIntersect(box, rect)) out.blocks.push(b.id);
+      });
+      edges.forEach(function (e) {
+        var geo = edgeCurve(e);
+        if (!geo) return;
+        var box = G.rectOfPoints([[geo.a.x, geo.a.y], [geo.c1.x, geo.c1.y],
+                                  [geo.c2.x, geo.c2.y], [geo.b.x, geo.b.y]]);
+        if (box && G.rectsIntersect(G.expand(box, 2), rect)) out.edges.push(e.id);
+      });
+      return out;
+    };
+
+    /* 某点是否落在某条连线上（框选层挡住了 SVG，所以要在几何上自己判） */
+    api.edgeAt = function (x, y, tol) {
+      var G = window.Flow.Geom;
+      tol = tol == null ? 8 : tol;
+      for (var i = edges.length - 1; i >= 0; i--) {
+        var geo = edgeCurve(edges[i]);
+        if (!geo) continue;
+        if (G.distToCubicSq(x, y, geo.a, geo.c1, geo.c2, geo.b) <= tol * tol) return edges[i].id;
+      }
+      return null;
+    };
+
+    api.selectAll = function () {
+      selClear();
+      blocks.forEach(function (b) { sel.blocks[b.id] = true; });
+      edges.forEach(function (e) { sel.edges[e.id] = true; });
+      render();
+      return selCount();
+    };
+
+    /* ── 整组平移 ─────────────────────────────────────────────
+       拖动开始记下所有选中块的起点，之后按"起点 + 同一位移"设置绝对位置。
+       这样多块之间的相对关系不会因为逐帧累加而漂移。
+       ──────────────────────────────────────────────────────── */
+
+    var moveStart = null;      // {id: {x, y}}
+
+    api.beginMove = function () {
+      moveStart = {};
+      selIds('block').forEach(function (id) {
+        var b = byId(id);
+        if (b) moveStart[id] = { x: b.x, y: b.y };
+      });
+      return Object.keys(moveStart).length;
+    };
+
+    /* 把位移夹在"所有选中块都还在可视范围内"的区间里 */
+    api.clampMove = function (dx, dy) {
+      if (!moveStart) return { dx: dx, dy: dy };
+      var G = window.Flow.Geom;
+      var rng = visibleRange();
+      var xs = [], ys = [];
+      Object.keys(moveStart).forEach(function (id) {
+        xs.push(moveStart[id].x);
+        ys.push(moveStart[id].y);
+      });
+      var rx = G.clampSharedDelta(xs, rng.x0, rng.x1);
+      var ry = G.clampSharedDelta(ys, rng.y0, rng.y1);
+      return {
+        dx: clamp(dx, rx.min, rx.max),
+        dy: clamp(dy, ry.min, ry.max)
+      };
+    };
+
+    api.moveBy = function (dx, dy) {
+      if (!moveStart) return 0;
+      var n = 0;
+      Object.keys(moveStart).forEach(function (id) {
+        var b = byId(id);
+        if (!b) return;
+        b.x = moveStart[id].x + dx;
+        b.y = moveStart[id].y + dy;
+        var el = els[id];
+        if (el) { el.style.left = b.x + 'px'; el.style.top = b.y + 'px'; }
+        n++;
+      });
+      renderEdges();
+      return n;
+    };
+
+    api.endMove = function () {
+      moveStart = null;
+    };
 
     /* ── 增删改 ───────────────────────────────────────────── */
 
@@ -364,8 +508,12 @@
     function removeBlock(id, skipUndo) {
       if (!skipUndo) pushUndo(snapshot());
       blocks = blocks.filter(function (b) { return b.id !== id; });
+      // 连着这个块的连线一起删，并从选中集合里清掉
+      var dropped = [];
+      edges.forEach(function (e) { if (e.from === id || e.to === id) dropped.push(e.id); });
       edges = edges.filter(function (e) { return e.from !== id && e.to !== id; });
-      if (selected && selected.type === 'block' && selected.id === id) selected = null;
+      dropped.forEach(function (eid) { selRemove('edge', eid); });
+      selRemove('block', id);
       if (editingId === id) editingId = null;
       render();
       changed();
@@ -462,13 +610,13 @@
       if (drag) {
         var b = byId(drag.id);
         if (!b) { drag = null; return; }
-        var rng = visibleRange();
-        b.x = clamp(screenX(e) + drag.ox, rng.x0, rng.x1);
-        b.y = clamp(screenY(e) + drag.oy, rng.y0, rng.y1);
+        // 目标位置 → 位移 → 夹在"整组都还在可视范围内"的区间 → 整组应用
+        var wantX = screenX(e) + drag.ox - moveStart[drag.id].x;
+        var wantY = screenY(e) + drag.oy - moveStart[drag.id].y;
+        var d = api.clampMove(wantX, wantY);
+        api.moveBy(d.dx, d.dy);
         drag.moved = true;
-        var el = els[b.id];
-        if (el) { el.style.left = b.x + 'px'; el.style.top = b.y + 'px'; }
-        renderEdges();
+        if (api.onGroupMove) api.onGroupMove('move', d.dx, d.dy);
         return;
       }
       if (linking) {
@@ -488,6 +636,8 @@
         var moved = drag.moved;
         var before = drag.before;
         drag = null;
+        api.endMove();
+        if (api.onGroupMove) api.onGroupMove('end', 0, 0);
         if (moved) { pushUndo(before); changed(); }
       }
       if (linking) {
@@ -522,8 +672,9 @@
       enabled = !!v;
       if (!enabled) {
         if (editingId) stopEdit();
-        if (selected) { selected = null; render(); }
+        if (selCount()) { selClear(); render(); }
         drag = null;
+        moveStart = null;
         linking = null;
         preview.classList.remove('on');
         preview.setAttribute('d', '');
@@ -534,28 +685,44 @@
     api.setTool = function (t) { tool = t; };
     api.setColor = function (i) {
       colorIndex = clamp(i | 0, 0, COLORS.length - 1);
-      if (selected && selected.type === 'block') {
-        var b = byId(selected.id);
-        if (b && b.color !== colorIndex) {
-          pushUndo(snapshot());
-          b.color = colorIndex;
-          render();
-          changed();
-        }
+      var ids = selIds('block');
+      if (ids.length) {
+        var changedAny = false;
+        pushUndo(snapshot());
+        ids.forEach(function (id) {
+          var b = byId(id);
+          if (b && b.color !== colorIndex) { b.color = colorIndex; changedAny = true; }
+        });
+        if (changedAny) { render(); changed(); }
       }
       return colorIndex;
     };
     api.getColor = function () { return colorIndex; };
 
+    /* 删除全部选中（多选） */
     api.deleteSelected = function () {
-      if (!selected) return false;
-      if (selected.type === 'block') { removeBlock(selected.id); return true; }
+      if (!selCount()) return 0;
       pushUndo(snapshot());
-      edges = edges.filter(function (e) { return e.id !== selected.id; });
-      selected = null;
+      var blockIds = selIds('block');
+      var edgeIds = selIds('edge');
+      if (blockIds.length) {
+        var kill = {};
+        blockIds.forEach(function (id) { kill[id] = true; });
+        blocks = blocks.filter(function (b) { return !kill[b.id]; });
+        // 连着被删块的连线也一起清掉
+        edges = edges.filter(function (e) { return !kill[e.from] && !kill[e.to]; });
+      }
+      if (edgeIds.length) {
+        var ke = {};
+        edgeIds.forEach(function (id) { ke[id] = true; });
+        edges = edges.filter(function (e) { return !ke[e.id]; });
+      }
+      var n = blockIds.length + edgeIds.length;
+      selClear();
+      editingId = null;
       render();
       changed();
-      return true;
+      return n;
     };
 
     api.clearAll = function () {
@@ -563,7 +730,7 @@
       pushUndo(snapshot());
       blocks = [];
       edges = [];
-      selected = null;
+      selClear();
       editingId = null;
       render();
       changed();
@@ -577,9 +744,10 @@
     api.replaceAll = function (bs, es) {
       blocks = (bs || []).slice();
       edges = (es || []).slice();
-      selected = null;
+      selClear();
       editingId = null;
       drag = null;
+      moveStart = null;
       linking = null;
       render();
       changed();
