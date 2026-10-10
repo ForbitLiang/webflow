@@ -1637,6 +1637,48 @@
       out.moveDY = Math.round(bA.y - before.ay);
       out.relativeKept = Math.round((bB.x - bA.x) - (before.bx - before.ax)) === 0;
 
+      /* ②b 真实拖动手势：在字块元素上合成 pointerdown/move/up。
+         这一段是补的教训——之前只测了「直接调 API」，而节点 pointerdown 里
+         少写 api. 前缀导致裸调用 beginMove()，一拖就 ReferenceError，
+         字块完全拖不动。API 调用是好的，手势路径却没人走。 */
+      var errBefore = (window.Flow.__errors || []).length;
+      var nodeEl = document.querySelector('#nodes .node');
+      if (nodeEl) {
+        var dragId = nodeEl.getAttribute('data-id');
+        var selSet = {};
+        blocks.selectedBlockIds().forEach(function (id) { selSet[id] = true; });
+        // 快照：选中的应该跟着走，没选的一个像素都不该动
+        var snap0 = blocks.getBlocks().map(function (b) {
+          return { b: b, x: b.x, y: b.y, sel: !!selSet[b.id] };
+        });
+        var bDrag = null;
+        snap0.forEach(function (r) { if (r.b.id === dragId) bDrag = r.b; });
+        var rect0 = nodeEl.getBoundingClientRect();
+        var pdx = rect0.left + rect0.width / 2, pdy = rect0.top + rect0.height / 2;
+        var gx0 = bDrag.x, gy0 = bDrag.y;
+
+        nodeEl.dispatchEvent(pev('pointerdown', pdx, pdy));
+        window.dispatchEvent(pev('pointermove', pdx + 80, pdy + 55));
+        window.dispatchEvent(pev('pointerup', pdx + 80, pdy + 55));
+
+        out.gestureDX = Math.round(bDrag.x - gx0);
+        out.gestureDY = Math.round(bDrag.y - gy0);
+        out.gestureMoved = out.gestureDX !== 0 || out.gestureDY !== 0;
+        out.gestureDragWasSelected = !!selSet[dragId];
+        // 选中的其他块：应与被拖块位移一致
+        out.gestureSelectedFollowed = snap0
+          .filter(function (r) { return r.sel && r.b.id !== dragId; })
+          .every(function (r) {
+            return Math.round(r.b.x - r.x) === out.gestureDX &&
+                   Math.round(r.b.y - r.y) === out.gestureDY;
+          });
+        // 没选中的块：必须原地不动
+        out.gestureUnselectedStayed = snap0
+          .filter(function (r) { return !r.sel; })
+          .every(function (r) { return r.b.x === r.x && r.b.y === r.y; });
+        out.gestureErrors = (window.Flow.__errors || []).length - errBefore;
+      }
+
       // ③ 笔迹框选与高亮
       strokeSel = board.getStrokes().slice();
       board.setHighlight(strokeSel);

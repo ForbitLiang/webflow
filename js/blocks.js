@@ -202,8 +202,8 @@
           select('block', b.id);
         }
         // 点已选中的块：保持整个选区，开始整组拖动
-
-        beginMove();
+        // 注意：beginMove/moveBy/clampMove/endMove 只挂在 api 上，必须走 api. 调用
+        api.beginMove();
         drag = {
           id: b.id,
           ox: b.x - screenX(e),

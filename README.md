@@ -199,7 +199,8 @@ flow/
 │   └── app.js          编排层：状态机 / 分页 / 快捷键 / 时钟 / 工具
 ├── tools/
 │   ├── preview.js      着色器的 CPU 等价实现，离线渲染调参
-│   └── selftest.js     纯逻辑自检（180 项）
+│   ├── selftest.js     纯逻辑自检（180 项）
+│   └── check-globals.js 源码级检查：裸调用 api-only 函数
 ├── docs/               预览截图
 ├── 启动预览.ps1         本地起服务并打开浏览器
 └── 发布到GitHub.ps1     一键发布到 GitHub Pages
@@ -287,11 +288,14 @@ flow/
 ## 自检
 
 ```powershell
-node tools/selftest.js     # 180 项纯逻辑断言
-node tools/preview.js      # 离线渲染一帧水面到 .preview/cpu.png
+node tools/selftest.js       # 180 项纯逻辑断言
+node tools/check-globals.js  # 源码级检查：裸调用只挂在 api 上的函数
+node tools/preview.js        # 离线渲染一帧水面到 .preview/cpu.png
 node tools/preview.js 900 560 20 12        # 指定时刻（这里是正午）
 node tools/preview.js --strip              # 一天 12 个时刻的联络表
 ```
+
+`check-globals.js` 是踩坑之后加的：`board.js` / `blocks.js` 里有一批函数只写成 `api.xxx = function(){}`，没有本地 `function xxx(){}` 声明。此时代码里若裸写 `xxx(...)`，只有走到那一行才会 `ReferenceError`——**而自检如果不经过那条交互路径就发现不了**。真实踩过：节点拖动里 `beginMove()` 少了 `api.` 前缀，字块完全拖不动，但直接调 API 的测试全绿。这个检查器按文件区分「本地函数声明」和「只挂在 api 上」，把这类裸调用揪出来。
 
 `selftest.js` 覆盖：笔迹打包往返、多页存档与旧版本迁移、脏数据清洗、相机数学（锚点不变性 / 上下限 / fit 居中）、**湖面光照调色板（明暗关系 / 色温 / 光源仰角 / 24 小时连续无阶跃）**、工程文件多页往返、`.excalidraw` 导入（绑定解析 + 几何兜底 + 落单箭头计数）、内容包围盒、PNG 分层合成。
 
