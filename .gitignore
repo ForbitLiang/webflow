@@ -1,0 +1,7 @@
+# 本地预览产物（tools/preview.js 与无头截图）
+.preview/
+
+# 系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini

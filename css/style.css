@@ -1,0 +1,791 @@
+/* ============================================================
+   flow — 一池水，一点声音，一块白板
+   零依赖 · 零构建 · 零外部资源
+   ============================================================ */
+
+:root {
+  --ink:        #eaf2ff;
+  --ink-dim:    rgba(234, 242, 255, .52);
+  --ink-faint:  rgba(234, 242, 255, .30);
+  --line:       rgba(190, 215, 255, .14);
+  --glass:      rgba(10, 18, 28, .42);
+  --glass-line: rgba(190, 215, 255, .12);
+  --accent:     #9fc4ff;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+          system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --pad: clamp(20px, 3.4vw, 54px);
+  --ease: cubic-bezier(.22, .61, .36, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #04070c;
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+body.is-loading { cursor: wait; }
+
+/* ── 水面与白板两层画布 ───────────────────────────────────── */
+#water, #board, #board-live, #fallback {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#water { z-index: 0; }
+
+#fallback {
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .8s var(--ease);
+  background:
+    radial-gradient(120% 80% at 50% 108%, #0d1a26 0%, #060b12 52%, #04070c 100%),
+    #04070c;
+}
+body.water-fallback #fallback { opacity: 1; }
+body.water-fallback #water   { display: none; }
+
+#board {
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+  transition: opacity .55s var(--ease);
+}
+#board-live {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+  transition: opacity .55s var(--ease);
+}
+body.mode-board #board,
+body.mode-board #board-live { opacity: 1; }
+/* 只有最上层的 live 层接收指针事件 */
+body.mode-board #board-live { pointer-events: auto; }
+
+/* ── 字块之间的连线 ───────────────────────────────────────── */
+#edges {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  transition: opacity .55s var(--ease);
+}
+body.mode-board #edges { opacity: 1; }
+#edge-layer path {
+  fill: none;
+  stroke: rgba(190, 215, 255, .55);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+#edge-layer path.hit {
+  stroke: rgba(0, 0, 0, 0);
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+#edge-layer path.sel {
+  stroke: rgba(159, 196, 255, .95);
+  stroke-width: 2.6;
+}
+#edge-layer g:hover path:not(.hit) { stroke: rgba(214, 232, 255, .95); }
+#edge-preview {
+  stroke: rgba(190, 215, 255, .5);
+  stroke-width: 1.6;
+  stroke-dasharray: 6 5;
+  marker-end: url(#arrow);
+  opacity: 0;
+  transition: opacity .18s var(--ease);
+}
+#edge-preview.on { opacity: 1; }
+
+/* ── 文字工具的整屏接收层 ─────────────────────────────────────
+   关键：这一层**不能**带任何 transform，命中区域才恒等于视口。
+   之前把接收挂在 #nodes 上，而 #nodes 带 scale 变换，
+   缩放到 100% 以下时它的命中矩形小于视口，边缘就漏给画笔了。 */
+#text-catch {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+body.mode-board.tool-text #text-catch {
+  pointer-events: auto;
+  cursor: text;
+}
+
+/* ── 字块层（跟着相机缩放，所以要压在接收层之上） ───────────── */
+#nodes {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  transition: opacity .55s var(--ease);
+}
+body.mode-board #nodes { opacity: 1; }
+
+.node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  min-width: 76px;
+  max-width: 320px;
+  padding: 9px 13px;
+  border: 1px solid var(--nb, rgba(190, 215, 255, .5));
+  border-radius: 13px;
+  background: rgba(9, 16, 26, .58);
+  backdrop-filter: blur(9px) saturate(1.2);
+  -webkit-backdrop-filter: blur(9px) saturate(1.2);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .34);
+  color: var(--nt, #eaf2ff);
+  font-size: 15px;
+  line-height: 1.5;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color .2s var(--ease), box-shadow .2s var(--ease), background .2s var(--ease);
+}
+.node:hover { border-color: rgba(214, 232, 255, .8); }
+.node.sel {
+  border-color: rgba(214, 232, 255, .95);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .42), 0 0 0 3px rgba(159, 196, 255, .16);
+}
+.node.editing {
+  cursor: text;
+  background: rgba(9, 16, 26, .78);
+  border-color: rgba(214, 232, 255, .95);
+}
+.node.dragging { cursor: grabbing; }
+
+.node-text {
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-height: 1.5em;
+}
+.node-text[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+/* 空块给一个提示 */
+.node-text:empty::before {
+  content: "输入…";
+  color: rgba(234, 242, 255, .3);
+}
+
+/* 连线手柄 */
+.node-handle {
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  margin-top: -7.5px;
+  padding: 0;
+  border: 1px solid rgba(214, 232, 255, .7);
+  border-radius: 50%;
+  background: rgba(12, 20, 32, .9);
+  cursor: crosshair;
+  opacity: 0;
+  transform: scale(.7);
+  transition: opacity .18s var(--ease), transform .18s var(--ease), background .18s var(--ease);
+}
+.node:hover .node-handle,
+.node.sel .node-handle { opacity: 1; transform: scale(1); }
+.node-handle:hover { background: var(--accent); }
+/* 触屏没有 hover，手柄常显 */
+body.is-touch .node-handle { opacity: .75; transform: scale(1); }
+
+/* 进入白板时水面压暗（着色器里也会同步 uCalm） */
+#water, #fallback { transition: filter .6s var(--ease); }
+body.mode-board #water,
+body.mode-board #fallback { filter: brightness(.62) saturate(.85); }
+
+/* ── 界面层 ───────────────────────────────────────────────── */
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--pad);
+  pointer-events: none;
+  transition: opacity .7s var(--ease), visibility .7s;
+}
+/* 全宽的行本身不接收事件，否则会挡住白板绘制 */
+#ui, #ui .row { pointer-events: none; }
+#ui a, #ui button, #ui input, #ui .panel { pointer-events: auto; }
+
+body.ui-hidden #ui { opacity: 0; visibility: hidden; }
+body.mode-board #ui .hints {
+  opacity: 0;
+  visibility: hidden;
+}
+#ui .hints { transition: opacity .45s var(--ease), visibility .45s; }
+body.mode-board #ui .row-bottom-right {
+  opacity: 0;
+  visibility: hidden;
+}
+#ui .row-bottom-right { transition: opacity .45s var(--ease), visibility .45s; }
+/* 时间可单独隐藏；白板模式下不显示时间（写字时不需要） */
+body.clock-hidden #ui .clock,
+body.mode-board #ui .clock { opacity: 0; visibility: hidden; }
+#ui .clock { transition: opacity .45s var(--ease), visibility .45s; }
+
+/* 隐藏的界面元素必须同时显式屏蔽命中测试。
+   实测在某些情况下 visibility:hidden 的子树里的 input 仍会被
+   elementFromPoint 命中，于是白板右下角留下一块"点了没反应"的死区
+   （既不加字块、也不画笔）。所以这里对隐藏区域统一关掉 pointer-events，
+   并且用 * 覆盖到后代，避免子元素自己声明的 pointer-events:auto 又把它打开。 */
+body.ui-hidden #ui,
+body.ui-hidden #ui *,
+body.mode-board #ui .hints,
+body.mode-board #ui .hints *,
+body.mode-board #ui .row-bottom-right,
+body.mode-board #ui .row-bottom-right *,
+body.mode-board #ui .clock,
+body.mode-board #ui .clock *,
+body.clock-hidden #ui .clock,
+body.clock-hidden #ui .clock * { pointer-events: none; }
+
+.row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.row-mid-left { flex-direction: column; align-items: flex-start; gap: 18px; justify-content: center; flex: 1; }
+.row-bottom-right { align-items: flex-end; justify-content: flex-end; gap: 14px; }
+
+/* 品牌 */
+.brand {
+  font-family: var(--serif);
+  font-size: clamp(20px, 1.9vw, 26px);
+  letter-spacing: .015em;
+  color: var(--ink);
+  text-decoration: none;
+  line-height: 1;
+  opacity: .95;
+}
+.brand span { color: var(--accent); }
+
+/* 右上角元信息 */
+.meta {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  padding-top: .5em;
+}
+.meta .sep { padding: 0 .3em; opacity: .55; }
+
+/* 时钟：精确到秒，字号放大，可单独隐藏 */
+.clock {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0;
+  color: var(--ink);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  text-shadow: 0 0 28px rgba(120, 165, 235, .30);
+}
+.clock-time {
+  font-size: clamp(26px, 3.1vw, 44px);
+  font-weight: 300;
+  letter-spacing: .005em;
+}
+.clock-ampm {
+  font-size: clamp(10px, 1vw, 13px);
+  letter-spacing: .2em;
+  color: var(--ink-faint);
+}
+
+/* 快捷键列表 */
+.hints { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+.hints button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: .1em;
+  color: var(--ink-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  transition: color .22s var(--ease), transform .22s var(--ease);
+}
+.hints button:hover { color: var(--ink); transform: translateX(3px); }
+.hints kbd {
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .06em;
+  min-width: 17px;
+  padding: 2px 4px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-faint);
+}
+
+/* ── 声音面板 ─────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.panel-label {
+  font-size: 10px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.seg { display: flex; gap: 2px; }
+.seg button {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: .08em;
+  color: var(--ink-dim);
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .22s var(--ease), color .22s var(--ease);
+}
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: rgba(159, 196, 255, .16); color: var(--ink); }
+
+.vol { display: flex; align-items: center; }
+.vol input {
+  appearance: none;
+  width: 74px;
+  height: 22px;
+  background: none;
+  cursor: pointer;
+  margin: 0;
+}
+.vol input::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 2px;
+  background: rgba(190, 215, 255, .25);
+}
+.vol input::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px; height: 11px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px rgba(159, 196, 255, .16);
+}
+.vol input::-moz-range-track { height: 2px; background: rgba(190, 215, 255, .25); }
+.vol input::-moz-range-thumb {
+  width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--ink);
+}
+
+.status {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  color: var(--ink-faint);
+  min-height: 1.2em;
+  text-align: right;
+  opacity: 0;
+  transition: opacity .4s var(--ease);
+}
+.status.show { opacity: 1; }
+
+/* ── 分页标签（像 Excel 的 sheet，贴在窗口最底） ─────────────── */
+#sheets {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 7;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  background: linear-gradient(to top, rgba(4, 7, 12, .78), rgba(4, 7, 12, 0));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .5s var(--ease), visibility .5s;
+}
+#sheets::-webkit-scrollbar { display: none; }
+body.mode-board #sheets {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.sheet-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px 0 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  color: var(--ink-faint);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease);
+}
+.sheet-tab:hover { color: var(--ink-dim); background: rgba(159, 196, 255, .08); }
+.sheet-tab.on {
+  color: var(--ink);
+  background: rgba(159, 196, 255, .16);
+  border-color: rgba(190, 215, 255, .28);
+}
+.sheet-name {
+  outline: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-name[contenteditable="true"] {
+  overflow: visible;
+  text-overflow: clip;
+  cursor: text;
+  color: var(--ink);
+}
+.sheet-x {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-faint);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .16s var(--ease), color .16s var(--ease);
+}
+.sheet-tab:hover .sheet-x { opacity: 1; }
+.sheet-x:hover { color: #ffb3b3; }
+.sheet-add {
+  flex: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease);
+}
+.sheet-add:hover {
+  color: var(--ink);
+  background: rgba(159, 196, 255, .14);
+  border-color: rgba(190, 215, 255, .4);
+}
+
+/* ── 导出菜单（从「导出」按钮弹出） ───────────────────────── */
+#export-menu {
+  position: fixed;
+  z-index: 8;
+  width: 236px;
+  padding: 6px;
+  border: 1px solid var(--glass-line);
+  border-radius: 14px;
+  background: rgba(10, 18, 28, .84);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  /* 菜单浮在工具条上方，所以阴影不能朝下——否则会在下方糊出一片暗区，
+     看起来像压住了工具条。用 0 偏移的均匀光晕。 */
+  box-shadow: 0 0 22px rgba(0, 0, 0, .5);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* left 由 JS 设成按钮中心，这里只负责居中与进出动画 */
+  transform: translateX(-50%) translateY(8px);
+  transition: opacity .18s var(--ease), transform .18s var(--ease), visibility .18s;
+}
+#export-menu.on {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+#export-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  transition: background .16s var(--ease);
+}
+#export-menu button:hover,
+#export-menu button:focus-visible { background: rgba(159, 196, 255, .13); outline: none; }
+.em-name {
+  display: block;
+  font-size: 12.5px;
+  letter-spacing: .02em;
+  color: var(--ink);
+}
+.em-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  letter-spacing: .03em;
+  color: var(--ink-faint);
+}
+
+/* ── 白板工具条 ───────────────────────────────────────────── */
+#toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(50px, 6vw, 62px);
+  transform: translate(-50%, 140%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  background: rgba(10, 18, 28, .62);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .45);
+  opacity: 0;
+  transition: transform .55s var(--ease), opacity .4s var(--ease);
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#toolbar::-webkit-scrollbar { display: none; }
+body.mode-board #toolbar { transform: translate(-50%, 0); opacity: 1; }
+
+#toolbar button {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: .06em;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .2s var(--ease), color .2s var(--ease);
+}
+#toolbar button:hover { color: var(--ink); background: rgba(159, 196, 255, .1); }
+#toolbar button.on { background: rgba(159, 196, 255, .18); color: var(--ink); }
+#toolbar button svg {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round;
+}
+#toolbar button span { display: inline; }
+#toolbar button.icon-only {
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 10px;
+  min-width: 30px;
+  justify-content: center;
+}
+#toolbar #zoom-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  letter-spacing: .02em;
+  min-width: 52px;
+  justify-content: center;
+  color: var(--ink-dim);
+}
+.tool-sep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; flex: none; }
+
+/* 平移中：整个视口换成抓手 */
+body.panning, body.panning #board-live, body.panning #nodes { cursor: grabbing !important; }
+body.pan-ready, body.pan-ready #board-live { cursor: grab; }
+body.pan-ready #nodes .node { cursor: grab; }
+
+/* 拖文件进来时给个提示 */
+body.dropping::after {
+  content: "松开即可导入";
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  letter-spacing: .3em;
+  color: var(--ink);
+  background: rgba(6, 12, 20, .55);
+  border: 1px dashed rgba(190, 215, 255, .5);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+.swatches { display: flex; gap: 5px; padding: 0 3px; }
+.swatches .sw {
+  width: 22px; height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: none;
+}
+.swatches .sw i {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 0 10px -1px var(--c);
+  transition: transform .2s var(--ease);
+}
+.swatches .sw:hover i { transform: scale(1.15); }
+.swatches .sw.on { background: rgba(159, 196, 255, .18); }
+.swatches .sw.on i { transform: scale(1.2); }
+
+/* ── 进入页 ───────────────────────────────────────────────── */
+#gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(115% 85% at 50% 52%, rgba(6, 12, 20, .72) 0%, rgba(3, 6, 10, .95) 100%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  transition: opacity .85s var(--ease), visibility .85s;
+}
+#gate.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.gate-inner { text-align: center; padding: 24px; }
+.gate-brand {
+  font-family: var(--serif);
+  font-size: clamp(38px, 6vw, 62px);
+  margin: 0 0 .35em;
+  letter-spacing: .01em;
+  line-height: 1;
+}
+.gate-brand span { color: var(--accent); }
+.gate-line {
+  margin: 0 0 2.2em;
+  font-size: 13px;
+  letter-spacing: .22em;
+  color: var(--ink-dim);
+}
+#gate-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 12.5px;
+  letter-spacing: .3em;
+  text-indent: .3em;
+  color: var(--ink);
+  background: rgba(159, 196, 255, .07);
+  border: 1px solid rgba(190, 215, 255, .3);
+  border-radius: 999px;
+  padding: 15px 42px;
+  cursor: pointer;
+  transition: background .3s var(--ease), border-color .3s var(--ease), transform .3s var(--ease);
+}
+#gate-btn:hover {
+  background: rgba(159, 196, 255, .16);
+  border-color: rgba(190, 215, 255, .6);
+  transform: translateY(-1px);
+}
+.gate-note {
+  margin: 2.4em 0 0;
+  font-size: 10.5px;
+  letter-spacing: .16em;
+  color: var(--ink-faint);
+}
+
+/* ── 错误条 ───────────────────────────────────────────────── */
+#err {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 99;
+  padding: 10px 16px;
+  font-size: 11.5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: #ffd9d9;
+  background: rgba(120, 20, 30, .92);
+  border-top: 1px solid rgba(255, 160, 160, .35);
+  max-height: 32vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* 屏幕阅读器 */
+.sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* 触屏：隐藏键盘提示，工具条更紧凑 */
+body.is-touch .hints button kbd { display: none; }
+body.is-touch .hints button { font-size: 12.5px; }
+
+@media (max-width: 720px) {
+  #toolbar button span { display: none; }
+  #toolbar button { padding: 8px 9px; }
+  .panel { padding: 7px 10px; gap: 8px; }
+  .panel-label { display: none; }
+  .vol input { width: 54px; }
+  .meta { display: none; }
+  #toolbar { bottom: 48px; }
+  #sheets { height: 36px; padding: 0 8px; }
+  .sheet-name { max-width: 84px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: .01ms !important; }
+}
