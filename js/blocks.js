@@ -35,6 +35,7 @@
     var layer = opts.layer;            // #nodes（跟着相机缩放）
     var catchLayer = opts.catchLayer;  // #text-catch（不带变换的整屏接收层）
     var svg = opts.svg;                // #edges
+    var edgeCamera = opts.edgeCamera;  // #edge-camera（相机变换打在这一层）
     var edgeLayer = opts.edgeLayer;    // #edge-layer
     var preview = opts.preview;        // #edge-preview
     var camera = opts.camera || null;
@@ -171,9 +172,13 @@
       var t = camera ? camera.cssTransform() : 'none';
       layer.style.transform = t;
       layer.style.transformOrigin = '0 0';
-      if (svg) {
-        svg.style.transform = t;
-        svg.style.transformOrigin = '0 0';
+      // 连线的相机变换打在 <g id="edge-camera"> 上，而不是 <svg> 元素上：
+      // 打在元素上会把 SVG 视口一起缩放，缩小时裁剪区域小于窗口，
+      // 连线就只剩中间一段可见。打在内容层上则视口恒等于窗口。
+      if (edgeCamera) {
+        edgeCamera.setAttribute('transform', camera
+          ? 'translate(' + camera.x + ',' + camera.y + ') scale(' + camera.scale + ')'
+          : '');
       }
     }
 

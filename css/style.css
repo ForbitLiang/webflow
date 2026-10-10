@@ -468,6 +468,23 @@ body.clock-hidden #ui .sun * { pointer-events: none; }
 
 /* 快捷键列表 */
 .hints { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+.hints-note {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  letter-spacing: .06em;
+  color: var(--ink-faint);
+}
+.hints-note kbd {
+  font: inherit;
+  font-size: 9.5px;
+  min-width: 15px;
+  padding: 1px 3px;
+  margin: 0 1px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-dim);
+}
 .hints button {
   appearance: none;
   background: none;

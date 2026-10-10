@@ -115,6 +115,7 @@
     layer: $('nodes'),
     catchLayer: $('text-catch'),
     svg: $('edges'),
+    edgeCamera: $('edge-camera'),
     edgeLayer: $('edge-layer'),
     preview: $('edge-preview'),
     blocks: cloneBlocks(sheets[active].blocks),
@@ -1201,6 +1202,18 @@
 
   /* ── 快捷键 ─────────────────────────────────────────────── */
 
+  /* 工具与颜色的数字快捷键。
+     用 e.code（Digit1…）而不是 e.key：Shift+1 的 e.key 是 "!"，按不出数字。
+     Numpad 也一起支持。 */
+  var TOOL_BY_CODE = {
+    Digit1: 'select', Digit2: 'pen', Digit3: 'eraser', Digit4: 'text',
+    Numpad1: 'select', Numpad2: 'pen', Numpad3: 'eraser', Numpad4: 'text'
+  };
+  var INK_BY_CODE = {
+    Digit1: 0, Digit2: 1, Digit3: 2,
+    Numpad1: 0, Numpad2: 1, Numpad3: 2
+  };
+
   function isTyping() {
     var el = document.activeElement;
     if (!el) return false;
@@ -1254,6 +1267,18 @@
     }
     if (e.altKey) return;
 
+    // 数字键：1~4 切工具（用 e.code 而不是 e.key —— Shift+1 的 e.key 是 "!"）
+    if (state === 'board') {
+      var code = e.code || '';
+      if (e.shiftKey) {
+        var ink = INK_BY_CODE[code];
+        if (ink != null) { setInk(ink); e.preventDefault(); return; }
+      } else {
+        var toolByKey = TOOL_BY_CODE[code];
+        if (toolByKey) { setTool(toolByKey); e.preventDefault(); return; }
+      }
+    }
+
     switch (k) {
       case 'b': toggleMode(); e.preventDefault(); break;
       case 'escape':
@@ -1295,9 +1320,6 @@
         break;
       case '=': case '+':
         if (state === 'board') { camera.zoomCenter(1.25, vw, vh); e.preventDefault(); }
-        break;
-      case '1': case '2': case '3':
-        if (state === 'board') setInk(Number(k) - 1);
         break;
     }
   });
@@ -1577,6 +1599,56 @@
       out.reloadSheets = reload.sheets.length;
       out.reloadA0 = reload.sheets[0].blocks.length;
       out.reloadA0Rows = reload.sheets[0].strokes.length;
+
+      /* 数字键切工具自检：1~4 切工具、Shift+1~3 切颜色。
+         Shift+1 的 e.key 是 "!"，所以这里故意把 key 传成 "!"，
+        用来证明实现读的是 e.code 而不是 e.key。 */
+      function kev(code, keyChar, shift) {
+        return new KeyboardEvent('keydown', {
+          code: code, key: keyChar, shiftKey: !!shift,
+          bubbles: true, cancelable: true
+        });
+      }
+      setMode('board');
+      window.dispatchEvent(kev('Digit1', '1', false));
+      out.key1 = tool;
+      window.dispatchEvent(kev('Digit4', '4', false));
+      out.key4 = tool;
+      window.dispatchEvent(kev('Digit3', '3', false));
+      out.key3 = tool;
+      window.dispatchEvent(kev('Digit2', '2', false));
+      out.key2 = tool;
+      window.dispatchEvent(kev('Digit1', '!', true));      // Shift+1 → 颜色，不是工具
+      out.shift1Ink = board.getInk();
+      out.shift1KeptTool = tool;
+      window.dispatchEvent(kev('Digit3', '#', true));
+      out.shift3Ink = board.getInk();
+      setInk(0);
+
+      /* 连线可见性自检：SVG 的裁剪区域必须恒等于窗口。
+         如果相机变换打在 <svg> 元素上，元素视口会被一起缩放——
+         缩小时裁剪区域小于窗口，连线就只剩中间一段可见（真实踩过，已用最小
+         SVG 实验确认：scale(0.3) 时 getBoundingClientRect 变成窗口的 30%）。
+         注意：camera.set 触发的重绘是 rAF 节流的，这里必须同步调一次
+         viewChanged，否则测到的是"变换还没应用"的旧状态（这个竞态让本断言
+         一度两种情况下都通过，等于没测）。 */
+      var edgesEl = $('edges');
+      if (edgesEl) {
+        var zoomSaved = camera.scale;
+        camera.set(0, 0, 0.5);                       // 缩小到 50% 最能暴露问题
+        board.viewChanged();
+        blocks.viewChanged();                        // 同步应用，别等 rAF
+        var er = edgesEl.getBoundingClientRect();
+        out.svgClipW = Math.round(er.width);
+        out.svgClipH = Math.round(er.height);
+        out.svgClipCoversWindow =
+          er.width >= window.innerWidth - 1 && er.height >= window.innerHeight - 1;
+        var ec = $('edge-camera');
+        out.edgeCamHasTransform = !!(ec && /scale\(/.test(ec.getAttribute('transform') || ''));
+        camera.set(0, 0, zoomSaved);
+        board.viewChanged();
+        blocks.viewChanged();
+      }
 
       /* 导出菜单自检：能打开、项数对、不压住工具条、且被夹在视口内。
          注意必须先切到白板模式——水面下工具条是隐藏的（位置在屏幕外），
