@@ -54,6 +54,21 @@
       <span class="clock-time" id="clock-text">--:--:--</span>
       <span class="clock-ampm" id="clock-ampm">p.m.</span>
     </p>
+
+    <!-- 湖面时间拨码：拖到哪个时刻，湖面就是那个时刻的光 -->
+    <div class="sun" id="sun-panel">
+      <div class="sun-head">
+        <button type="button" id="sun-auto" class="sun-auto on" aria-pressed="true"
+                title="跟随当前时间">自动</button>
+        <span class="sun-label" id="sun-label">--:--</span>
+      </div>
+      <input type="range" id="sun-range" min="0" max="1439" step="5" value="720"
+             aria-label="湖面时间（拖动可预览一天里不同时刻的水面）">
+      <div class="sun-scale" aria-hidden="true">
+        <span>0</span><span>6</span><span>12</span><span>18</span><span>24</span>
+      </div>
+    </div>
+
     <nav class="hints" aria-label="快捷键">
       <button type="button" data-act="board"><kbd>B</kbd> 白板</button>
       <button type="button" data-act="clock"><kbd>T</kbd> 时间</button>
@@ -160,6 +175,7 @@
 
 <script src="js/store.js" defer></script>
 <script src="js/camera.js" defer></script>
+<script src="js/sun.js" defer></script>
 <script src="js/water.js" defer></script>
 <script src="js/audio.js" defer></script>
 <script src="js/board.js" defer></script>

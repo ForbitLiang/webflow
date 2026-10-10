@@ -1,23 +1,46 @@
 /* ============================================================
    preview.js — 水景着色器的 CPU 等价实现（仅用于调参预览）
-   运行： node tools/preview.js [宽度] [高度] [时间]
-   产物： .preview/cpu.png
+
+   用法：
+     node tools/preview.js [宽] [高] [时间] [小时] [nodrops]
+     node tools/preview.js --strip            # 一天 12 个时刻的联络表
+     node tools/preview.js --strip 宽 高 时间
+
+   产物： .preview/cpu.png 或 .preview/strip.png
 
    ⚠️ 这个文件是 js/water.js 里 GLSL 的逐行移植。
       修改着色器参数时，必须同步修改这里，否则预览会失真。
       GPU 用 fp32、这里用 fp64，噪声纹理会略有差异，
       但频率与对比度一致，足以判断观感。
+      光照参数不在这里硬编码，而是和线上一样取自 js/sun.js，
+      所以调色板只有一处真源。
    ============================================================ */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const vm = require('vm');
 
-const W = parseInt(process.argv[2] || '720', 10);
-const H = parseInt(process.argv[3] || '450', 10);
-const T = parseFloat(process.argv[4] || '20');
-const MOUSE_DROP = process.argv[5] !== 'nodrops';
+/* ── 载入 js/sun.js（它挂到 window.Flow 上） ─────────────── */
+
+const sunSandbox = { window: {} };
+vm.createContext(sunSandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'sun.js'), 'utf8'),
+  sunSandbox, { filename: 'sun.js' });
+const Sun = sunSandbox.window.Flow.Sun;
+
+/* ── 命令行 ─────────────────────────────────────────────── */
+
+const argv = process.argv.slice(2);
+const STRIP = argv[0] === '--strip';
+const nums = argv.filter(a => a !== '--strip' && a !== 'nodrops');
+
+const W = parseInt(STRIP ? (nums[0] || '360') : (nums[0] || '720'), 10);
+const H = parseInt(STRIP ? (nums[1] || '225') : (nums[1] || '450'), 10);
+const T = parseFloat(nums[2] || '20');
+const HOUR = parseFloat(nums[3] != null ? nums[3] : '22');
+const MOUSE_DROP = argv.indexOf('nodrops') < 0 && !STRIP;
 
 /* ── 最小 PNG 编码器 ─────────────────────────────────────── */
 
@@ -137,16 +160,18 @@ function waterH(ux, uy, t, drops) {
   return h;
 }
 
-function render(t, drops) {
-  const buf = Buffer.alloc(W * H * 3);
-  const eps = 1.8 / H;
-  const L = norm3(0, 0.42, 0.55);
+function render(t, drops, P, w, h) {
+  const buf = Buffer.alloc(w * h * 3);
+  const eps = 1.8 / h;
+  const aspect = w / h;
+  const L = P.dir;                                  // 光源方向由调色板给出
+  const deep = P.deep, mid = P.mid, sky = P.sky, lightC = P.light;
 
-  for (let py = 0; py < H; py++) {
-    for (let px = 0; px < W; px++) {
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
       // gl_FragCoord 原点在左下
-      const ux = (px + 0.5) / W;
-      const uy = (H - py - 0.5) / H;
+      const ux = (px + 0.5) / w;
+      const uy = (h - py - 0.5) / h;
 
       const hl = waterH(ux - eps, uy, t, drops);
       const hr = waterH(ux + eps, uy, t, drops);
@@ -155,27 +180,30 @@ function render(t, drops) {
       const hc = (hl + hr + hd + hu) * 0.25;
       const n = norm3((hl - hr) * 90.0, (hd - hu) * 90.0, 1.0);
 
-      const V = norm3((ux - 0.5) * ASPECT * 0.9, (uy - 0.5) * 0.9, 1.0);
+      const V = norm3((ux - 0.5) * aspect * 0.9, (uy - 0.5) * 0.9, 1.0);
 
       const horizon = smoothstep(0.05, 1.00, uy);
-      let r = mix(0.014, 0.052, horizon * 0.95);
-      let g = mix(0.024, 0.086, horizon * 0.95);
-      let b = mix(0.038, 0.112, horizon * 0.95);
+      const hh = horizon * 0.95;
+      let r = mix(deep[0], mid[0], hh);
+      let g = mix(deep[1], mid[1], hh);
+      let b = mix(deep[2], mid[2], hh);
       const hz3 = Math.pow(horizon, 3) * 0.35;
-      r += 0.105 * hz3; g += 0.158 * hz3; b += 0.215 * hz3;
-      const band = 0.22 * Math.exp(-Math.pow((uy - 0.94) * 8.0, 2));
-      r += 0.105 * band; g += 0.158 * band; b += 0.215 * band;
+      r += sky[0] * hz3; g += sky[1] * hz3; b += sky[2] * hz3;
+      const band = P.far * Math.exp(-Math.pow((uy - 0.94) * 8.0, 2));
+      r += sky[0] * band; g += sky[1] * band; b += sky[2] * band;
 
       // 大尺度涌浪的明暗
-      r += 0.105 * hc * 2.5; g += 0.158 * hc * 2.5; b += 0.215 * hc * 2.5;
+      const swell = hc * 2.5;
+      r += sky[0] * swell; g += sky[1] * swell; b += sky[2] * swell;
 
-      const kW = mix(3.0, 8.0, uy);
+      const kW = mix(3.0, 8.0, uy) * P.path;
       const pathFactor = Math.exp(-Math.pow((ux - 0.5) * kW, 2));
 
-      const fres = Math.pow(1 - clamp(dot3(n, V), 0, 1), 3.5) * 0.62 * (0.25 + 0.75 * pathFactor);
-      r = mix(r, 0.105 * 1.25, fres);
-      g = mix(g, 0.158 * 1.25, fres);
-      b = mix(b, 0.215 * 1.25, fres);
+      const fres = Math.min(1.0,
+        Math.pow(1 - clamp(dot3(n, V), 0, 1), 3.5) * 0.62 * P.amb * (0.25 + 0.75 * pathFactor));
+      r = mix(r, sky[0] * 1.25, fres);
+      g = mix(g, sky[1] * 1.25, fres);
+      b = mix(b, sky[2] * 1.25, fres);
 
       // 水平压扁法线：掠射视角下光斑横向拉长
       const ng = norm3(n[0] * 0.5, n[1], n[2]);
@@ -185,20 +213,20 @@ function render(t, drops) {
       const sB = glintAt(ng, V, norm3(L[0] - ca, L[1], L[2]));
 
       const Hh = norm3(L[0] + V[0], L[1] + V[1], L[2] + V[2]);
-      const sheen = Math.pow(Math.max(dot3(n, Hh), 0), 26) * 0.075 * (0.25 + 0.75 * pathFactor);
+      const sheen = Math.pow(Math.max(dot3(n, Hh), 0), 26) * P.sheen * (0.25 + 0.75 * pathFactor);
 
       const crest = Math.max(hc, 0) * 3.0 * pathFactor;
 
-      const gl = 1.70 * (0.05 + 0.95 * pathFactor);
-      r += 0.80 * sheen + 0.80 * crest + 0.80 * sR * gl;
-      g += 0.87 * sheen + 0.87 * crest + 0.87 * sG * gl;
-      b += 1.00 * sheen + 1.00 * crest + 1.00 * sB * gl;
+      const gl = P.glint * (0.05 + 0.95 * pathFactor);
+      r += lightC[0] * (sheen + crest) + lightC[0] * sR * gl;
+      g += lightC[1] * (sheen + crest) + lightC[1] * sG * gl;
+      b += lightC[2] * (sheen + crest) + lightC[2] * sB * gl;
 
-      const vigLen = Math.sqrt(Math.pow((ux - 0.5) * ASPECT, 2) + Math.pow(uy - 0.5, 2));
-      const vig = mix(0.60, 1.0, smoothstep(1.30, 0.28, vigLen));
+      const vigLen = Math.sqrt(Math.pow((ux - 0.5) * aspect, 2) + Math.pow(uy - 0.5, 2));
+      const vig = mix(P.vig, 1.0, smoothstep(1.30, 0.28, vigLen));
       r *= vig; g *= vig; b *= vig;
 
-      const o = (py * W + px) * 3;
+      const o = (py * w + px) * 3;
       buf[o] = Math.round(clamp(r, 0, 1) * 255);
       buf[o + 1] = Math.round(clamp(g, 0, 1) * 255);
       buf[o + 2] = Math.round(clamp(b, 0, 1) * 255);
@@ -220,21 +248,49 @@ function norm3(x, y, z) {
 
 /* ── 场景 ───────────────────────────────────────────────── */
 
-const drops = new Array(MAX_DROPS).fill(null).map(() => ({ x: 0, y: 0, z: -99, w: 0 }));
-if (MOUSE_DROP) {
+function makeDrops(w, h, withMouse) {
+  const drops = new Array(MAX_DROPS).fill(null).map(() => ({ x: 0, y: 0, z: -99, w: 0 }));
+  if (!withMouse) return drops;
   // 把「真实坐标 → 着色器像素坐标」的换算摆在这里，方便肉眼比对涟漪位置
-  const put = (i, ux, uy, age, w) => { drops[i] = { x: ux * W, y: uy * H, z: T - age, w }; };
+  const put = (i, ux, uy, age, ww) => { drops[i] = { x: ux * w, y: uy * h, z: T - age, w: ww }; };
   put(0, 0.50, 0.46, 0.30, 0.050);   // 主涟漪
   put(1, 0.28, 0.66, 0.16, 0.038);   // 次涟漪
   put(2, 0.72, 0.74, 0.55, 0.030);   // 扩散中的旧涟漪
+  return drops;
 }
 
 /* ── 输出 ───────────────────────────────────────────────── */
 
-const t0 = Date.now();
-const buf = render(T, drops);
 const outDir = path.join(__dirname, '..', '.preview');
 fs.mkdirSync(outDir, { recursive: true });
-const outFile = path.join(outDir, 'cpu.png');
-fs.writeFileSync(outFile, encodePNG(W, H, buf));
-console.log(`${W}x${H}  t=${T}  ${Date.now() - t0}ms  →  .preview/cpu.png`);
+const t0 = Date.now();
+
+if (STRIP) {
+  /* 联络表：一天里 12 个时刻并排看，一次就能判断明暗与色调的走向 */
+  const HOURS = [0, 2, 4, 5.8, 7.2, 9.5, 12, 15, 17, 18.5, 20, 22];
+  const COLS = 4, ROWS = Math.ceil(HOURS.length / COLS);
+  const outW = W * COLS, outH = H * ROWS;
+  const big = Buffer.alloc(outW * outH * 3);
+
+  HOURS.forEach((hour, i) => {
+    const P = Sun.palette(hour);
+    const cell = render(T, makeDrops(W, H, false), P, W, H);
+    const cx = (i % COLS) * W, cy = Math.floor(i / COLS) * H;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const src = (y * W + x) * 3;
+        const dst = ((cy + y) * outW + (cx + x)) * 3;
+        big[dst] = cell[src]; big[dst + 1] = cell[src + 1]; big[dst + 2] = cell[src + 2];
+      }
+    }
+  });
+
+  fs.writeFileSync(path.join(outDir, 'strip.png'), encodePNG(outW, outH, big));
+  console.log(`${HOURS.length} 个时刻  ${W}x${H} 每格  ${Date.now() - t0}ms  →  .preview/strip.png`);
+  console.log('时刻: ' + HOURS.map(h => `${Sun.formatHour(h)} ${Sun.phaseName(h)}`).join(' | '));
+} else {
+  const P = Sun.palette(HOUR);
+  const buf = render(T, makeDrops(W, H, MOUSE_DROP), P, W, H);
+  fs.writeFileSync(path.join(outDir, 'cpu.png'), encodePNG(W, H, buf));
+  console.log(`${W}x${H}  t=${T}  ${Sun.formatHour(HOUR)} ${P.name}  ${Date.now() - t0}ms  →  .preview/cpu.png`);
+}

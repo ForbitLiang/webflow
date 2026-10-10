@@ -59,9 +59,11 @@ sandbox.window = {
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root, 'js/store.js'), 'utf8'), sandbox, { filename: 'store.js' });
 vm.runInContext(fs.readFileSync(path.join(root, 'js/camera.js'), 'utf8'), sandbox, { filename: 'camera.js' });
+vm.runInContext(fs.readFileSync(path.join(root, 'js/sun.js'), 'utf8'), sandbox, { filename: 'sun.js' });
 
 const S = sandbox.window.Flow.Store;
 const Cam = sandbox.window.Flow.Camera;
+const Sun = sandbox.window.Flow.Sun;
 
 /* ── 断言 ────────────────────────────────────────────────── */
 
@@ -457,6 +459,158 @@ try {
 ok('按包围盒出图（400x300 → 800x600）', boxOk, boxErr || '尺寸不符');
 ok('笔迹层被绘制', inkCalled2);
 ok('内容层被绘制', contentCalled2);
+
+/* ── 13. 湖面光照调色板（一天之内的明暗） ───────────────── */
+
+console.log('\n[13] 湖面光照调色板');
+
+const noon = Sun.palette(12);
+const dusk = Sun.palette(18.5);
+const night = Sun.palette(22);
+const dawn = Sun.palette(7.2);
+
+const lum = c => (c[0] + c[1] + c[2]) / 3;
+const midLum = p => lum(p.mid);
+const skyLum = p => lum(p.sky);
+
+// 需求：白天白/亮、傍晚暗、夜里黑
+// 判据用 brightness()（中景 + 天光的复合量），因为实际观感是底色、天光、
+// 远处亮带、菲涅尔叠加的结果，单看中景底色会低估。实测渲染的整幅水体平均亮度：
+// 正午 0.304 / 傍晚 0.142 / 深夜 0.054（浏览器 WebGL 采样）。
+ok('正午比傍晚亮', midLum(noon) > midLum(dusk),
+  midLum(noon).toFixed(3) + ' vs ' + midLum(dusk).toFixed(3));
+ok('傍晚比深夜亮', midLum(dusk) > midLum(night),
+  midLum(dusk).toFixed(3) + ' vs ' + midLum(night).toFixed(3));
+ok('正午天光远亮于深夜', skyLum(noon) > skyLum(night) * 5,
+  skyLum(noon).toFixed(3) + ' vs ' + skyLum(night).toFixed(3));
+ok('白天水面确实"发白"（复合亮度 > 0.5）', Sun.brightness(12) > 0.5,
+  Sun.brightness(12).toFixed(3));
+ok('夜里水面确实"发黑"（复合亮度 < 0.12）', Sun.brightness(22) < 0.12,
+  Sun.brightness(22).toFixed(3));
+ok('傍晚是"暗的"（不到正午一半，但亮于深夜）',
+  Sun.brightness(18.5) < Sun.brightness(12) * 0.5 && Sun.brightness(18.5) > Sun.brightness(22),
+  Sun.brightness(18.5).toFixed(3));
+// 上界同样重要：底色过亮会把水纹对比度压掉，整片糊成雾（这是实测踩过的）
+ok('白天中景不过亮（过亮会糊成雾、丢掉水纹）', midLum(noon) < 0.40,
+  midLum(noon).toFixed(3));
+
+// 色温：日出日落偏暖（R > B），白天与夜里中性或偏冷
+ok('日出偏暖（红 > 蓝）', dawn.light[0] > dawn.light[2] + 0.3,
+  JSON.stringify(dawn.light));
+ok('傍晚偏暖（红 > 蓝）', dusk.light[0] > dusk.light[2] + 0.3, JSON.stringify(dusk.light));
+ok('正午光源接近白色', Math.abs(noon.light[0] - noon.light[2]) < 0.1, JSON.stringify(noon.light));
+ok('深夜光源偏冷（蓝 > 红）', night.light[2] > night.light[0], JSON.stringify(night.light));
+
+// 光源仰角：正午最高，日出日落贴地平线
+ok('正午光源最高', noon.elev > Sun.palette(9.5).elev && noon.elev > Sun.palette(15).elev,
+  noon.elev);
+ok('日出/傍晚光源低', dawn.elev < 0.25 && dusk.elev < 0.25, dawn.elev + ' / ' + dusk.elev);
+ok('光源方向是单位向量', (() => {
+  const m = Math.hypot(noon.dir[0], noon.dir[1], noon.dir[2]);
+  return Math.abs(m - 1) < 1e-9;
+})(), Math.hypot(noon.dir[0], noon.dir[1], noon.dir[2]));
+ok('光源方位固定在正前方（x 恒为 0，光柱才会在画面中央）',
+  noon.dir[0] === 0 && night.dir[0] === 0);
+ok('仰角越高，方向向量越"朝上"', noon.dir[1] > dusk.dir[1], noon.dir[1] + ' vs ' + dusk.dir[1]);
+
+// 亮度整体趋势：从深夜到正午单调不降
+let mono = true, prev = -1;
+for (let h = 0; h <= 12; h += 0.5) {
+  const v = Sun.brightness(h);
+  if (v < prev - 1e-9) { mono = false; break; }
+  prev = v;
+}
+ok('0 点到 12 点亮度单调不降', mono);
+let monoDown = true; prev = Infinity;
+for (let h = 12; h <= 24; h += 0.5) {
+  const v = Sun.brightness(h);
+  if (v > prev + 1e-9) { monoDown = false; break; }
+  prev = v;
+}
+ok('12 点到 24 点亮度单调不升', monoDown);
+
+// 连续性：真正的判据是"步长缩小，变化量也按比例缩小"。
+// 用 0.01 小时（36 秒）的细步长取样——如果存在阶跃，无论步长多细都会测到同样大的跳变。
+let maxJump = 0, jumpAt = -1;
+for (let h = 0; h < 24; h += 0.01) {
+  const a = Sun.palette(h), b = Sun.palette(h + 0.01);
+  const d = Math.abs(lum(a.mid) - lum(b.mid)) + Math.abs(lum(a.sky) - lum(b.sky));
+  if (d > maxJump) { maxJump = d; jumpAt = h; }
+}
+ok('细步长下无阶跃（36 秒内变化 < 0.006）', maxJump < 0.006,
+  'max=' + maxJump.toFixed(5) + ' @' + jumpAt.toFixed(2) + 'h');
+
+// 变化最快的时段是日出，1.4 小时走完由暗转亮；换算成速率要落在物理合理的范围
+let maxRate = 0, rateAt = -1;
+for (let h = 0; h < 24; h += 0.1) {
+  const a = Sun.palette(h), b = Sun.palette(h + 0.5);
+  const rate = (Math.abs(lum(a.mid) - lum(b.mid)) + Math.abs(lum(a.sky) - lum(b.sky))) / 0.5;
+  if (rate > maxRate) { maxRate = rate; rateAt = h; }
+}
+ok('最快变化速率合理（每小时 < 0.4，即天亮要用一小时量级）', maxRate < 0.4,
+  'max=' + maxRate.toFixed(3) + '/h @' + rateAt.toFixed(1) + 'h');
+ok('23:59 与 00:00 完全接得上', (() => {
+  const a = Sun.palette(23.999), b = Sun.palette(0);
+  return Math.abs(lum(a.mid) - lum(b.mid)) < 0.01 && Math.abs(lum(a.sky) - lum(b.sky)) < 0.01;
+})());
+
+// 取值健壮性
+ok('小时数超范围会被绕回', Sun.wrapHour(25) === 1 && Sun.wrapHour(-1) === 23);
+ok('非法小时数回落为 0', Sun.wrapHour(NaN) === 0 && Sun.wrapHour('x') === 0);
+ok('palette 对任意输入都返回完整字段', (() => {
+  const need = ['deep', 'mid', 'sky', 'light', 'dir', 'glint', 'sheen', 'amb', 'vig', 'far', 'path', 'name', 'hour'];
+  return [0, 6.5, 12, 18.5, 23.9, -3, 100, NaN].every(h => {
+    const p = Sun.palette(h);
+    return need.every(k => p[k] !== undefined) && p.deep.length === 3 && p.dir.length === 3;
+  });
+})());
+ok('所有颜色分量都在 0..1 之间', (() => {
+  for (let h = 0; h < 24; h += 0.25) {
+    const p = Sun.palette(h);
+    const bad = [].concat(p.deep, p.mid, p.sky, p.light).some(v => v < 0 || v > 1);
+    if (bad) return false;
+  }
+  return true;
+})());
+ok('强度倍数都是正数', (() => {
+  for (let h = 0; h < 24; h += 0.25) {
+    const p = Sun.palette(h);
+    if (!(p.glint > 0 && p.sheen > 0 && p.amb > 0 && p.vig > 0 && p.far >= 0 && p.path > 0)) return false;
+  }
+  return true;
+})());
+ok('暗角下限不超过 1（否则会反相变亮）', (() => {
+  for (let h = 0; h < 24; h += 0.25) if (Sun.palette(h).vig > 1) return false;
+  return true;
+})());
+
+// 时段命名
+ok('时段名正确', Sun.phaseName(0) === '深夜' && Sun.phaseName(12) === '正午' &&
+  Sun.phaseName(18.5) === '傍晚' && Sun.phaseName(22) === '夜晚' &&
+  Sun.phaseName(7.2) === '日出' && Sun.phaseName(20) === '暮色',
+  [0, 12, 18.5, 22, 7.2, 20].map(h => h + '→' + Sun.phaseName(h)).join(' '));
+ok('时段名覆盖整点', (() => {
+  for (let h = 0; h < 24; h += 0.5) if (!Sun.phaseName(h)) return false;
+  return true;
+})());
+
+// 时间格式化
+ok('时间格式化补零', Sun.formatHour(7.5) === '07:30' && Sun.formatHour(18.5) === '18:30',
+  Sun.formatHour(7.5) + ' / ' + Sun.formatHour(18.5));
+ok('时间格式化处理 24 点与跨零点', Sun.formatHour(24) === '00:00' && Sun.formatHour(23.999) === '00:00',
+  Sun.formatHour(24) + ' / ' + Sun.formatHour(23.999));
+
+// 关键帧自身必须自洽（收尾要和 0 点一致）
+const K = Sun.KEYS;
+ok('关键帧按时间递增', K.every((k, i) => i === 0 || k.h > K[i - 1].h));
+ok('首尾关键帧颜色一致（跨零点不跳）',
+  JSON.stringify(K[0].mid) === JSON.stringify(K[K.length - 1].mid) &&
+  JSON.stringify(K[0].sky) === JSON.stringify(K[K.length - 1].sky));
+ok('每个关键帧字段齐全', K.every(k =>
+  k.deep && k.deep.length === 3 && k.mid && k.sky && k.light &&
+  typeof k.elev === 'number' && typeof k.glint === 'number' &&
+  typeof k.sheen === 'number' && typeof k.amb === 'number' &&
+  typeof k.vig === 'number' && typeof k.far === 'number' && typeof k.path === 'number'));
 
 /* ── 结果 ────────────────────────────────────────────────── */
 

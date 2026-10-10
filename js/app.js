@@ -55,6 +55,10 @@
   var fileInput = $('file-input');
   var exportBtn = $('export-btn');
   var exportMenu = $('export-menu');
+  var sunPanel = $('sun-panel');
+  var sunRange = $('sun-range');
+  var sunLabel = $('sun-label');
+  var sunAuto = $('sun-auto');
 
   /* ── 子系统 ─────────────────────────────────────────────── */
 
@@ -331,6 +335,113 @@
     }, ms || 2200);
   }
 
+  /* ── 湖面时间：自动跟随真实时间，也可用拨码手动指定 ───────
+     内部维护一个"当前小时"，每帧朝目标缓动。缓动沿 24 小时圆环
+     走最短路径，所以从 23:50 跳到 00:10 只会挪 20 分钟，不会倒着
+     扫过一整天。
+     ──────────────────────────────────────────────────────── */
+
+  var sun = {
+    auto: prefs.sunAuto !== false,                              // 默认跟随真实时间
+    manualMin: typeof prefs.sunMin === 'number' ? prefs.sunMin : 720,
+    current: 0,
+    applied: -999,
+    shownMin: -1,
+    ready: false
+  };
+
+  function realHour() {
+    var d = new Date();
+    return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+  }
+
+  function sunTargetHour() {
+    return sun.auto ? realHour() : sun.manualMin / 60;
+  }
+
+  function updateSunUI(force) {
+    var minute = Math.round(sun.current * 60) % 1440;
+    if (!force && minute === sun.shownMin) return;
+    sun.shownMin = minute;
+
+    var P = Flow.Sun.palette(sun.current);
+    if (sunRange) sunRange.value = String(minute);
+    if (sunLabel) {
+      sunLabel.textContent = sun.auto
+        ? P.name                                        // 自动时显示时段名（真实时间上面的大钟已经在报）
+        : Flow.Sun.formatHour(sun.current) + ' · ' + P.name;
+    }
+    if (sunAuto) {
+      sunAuto.classList.toggle('on', sun.auto);
+      sunAuto.setAttribute('aria-pressed', sun.auto ? 'true' : 'false');
+    }
+    if (sunPanel) sunPanel.title = '湖面时间 ' + Flow.Sun.formatHour(sun.current) + '（' + P.name + '）';
+  }
+
+  // 每帧推进（由 water 的 onFrame 调用，和渲染同一个节拍）
+  function tickSun(dt) {
+    var target = sunTargetHour();
+    if (!sun.ready) {
+      sun.current = target;
+      sun.ready = true;
+    } else {
+      var delta = target - sun.current;
+      while (delta > 12) delta -= 24;
+      while (delta < -12) delta += 24;
+      // 指数逼近，和帧率无关
+      sun.current += delta * (1 - Math.exp(-dt / 0.30));
+      if (sun.current < 0) sun.current += 24;
+      if (sun.current >= 24) sun.current -= 24;
+    }
+
+    if (Math.abs(sun.current - sun.applied) > 0.0015) {
+      sun.applied = sun.current;
+      water.setPalette(Flow.Sun.palette(sun.current));
+      updateSunUI(false);
+    }
+  }
+
+  function setSunAuto(on, quiet) {
+    sun.auto = !!on;
+    prefs.sunAuto = sun.auto;
+    Flow.Store.savePrefs(prefs);
+    updateSunUI(true);
+    if (!quiet) {
+      showStatus(sun.auto
+        ? '湖面时间跟随当前时间 · ' + Flow.Sun.palette(realHour()).name
+        : '湖面时间已锁定 · ' + Flow.Sun.formatHour(sun.manualMin / 60));
+    }
+  }
+
+  function setSunManual(minute, quiet) {
+    sun.manualMin = Math.max(0, Math.min(1439, Math.round(minute)));
+    prefs.sunMin = sun.manualMin;
+    Flow.Store.savePrefs(prefs);
+    if (sun.auto) {
+      sun.auto = false;
+      prefs.sunAuto = false;
+      Flow.Store.savePrefs(prefs);
+    }
+    updateSunUI(true);
+    if (!quiet) {
+      showStatus('湖面时间 · ' + Flow.Sun.formatHour(sun.manualMin / 60) +
+        '（' + Flow.Sun.palette(sun.manualMin / 60).name + '）');
+    }
+  }
+
+  if (sunRange) {
+    sunRange.addEventListener('input', function () {
+      setSunManual(Number(sunRange.value), true);      // 拖动时不要刷状态提示
+    });
+    sunRange.addEventListener('change', function () {
+      showStatus('湖面时间 · ' + Flow.Sun.formatHour(sun.manualMin / 60) +
+        '（' + Flow.Sun.palette(sun.manualMin / 60).name + '）');
+    });
+  }
+  if (sunAuto) {
+    sunAuto.addEventListener('click', function () { setSunAuto(!sun.auto); });
+  }
+
   /* ── 时钟：精确到秒，可单独开关 ─────────────────────────── */
 
   var lastClockText = '';
@@ -371,6 +482,11 @@
   tickClock();
   setInterval(tickClock, 250);
   applyClock();
+
+  /* 湖面光照接进渲染节拍：先算好这一刻的光，再交给水景渲染 */
+  water.onFrame = tickSun;
+  water.setPalette(Flow.Sun.palette(sun.auto ? realHour() : sun.manualMin / 60));
+  updateSunUI(true);
 
   /* ── 涟漪：鼠标划过水面 ─────────────────────────────────── */
 
@@ -1070,6 +1186,12 @@
   }
   if (START_BOARD) setMode('board');
 
+  /* 深链：?hour=12 或 ?hour=18.5 —— 直接把湖面时间钉在某个时刻（也用于自动化截图） */
+  var hourParam = parseFloat(params.get('hour'));
+  if (isFinite(hourParam)) {
+    setSunManual(((hourParam % 24) + 24) % 24 * 60, true);
+  }
+
   /* 深链缩放：?zoom=1.6 —— 在 demo 之后施加，便于对比同一构图放大后的样子 */
   var zoomParam = parseFloat(params.get('zoom'));
   if (isFinite(zoomParam) && zoomParam > 0) {
@@ -1324,6 +1446,11 @@
       camY: camera.y,
       clockHidden: clockHidden,
       clock: lastClockText,
+      sunAuto: sun.auto,
+      sunHour: Math.round(sun.current * 100) / 100,
+      sunPhase: Flow.Sun.palette(sun.current).name,
+      sunBrightness: Math.round(Flow.Sun.brightness(sun.current) * 1000) / 1000,
+      paletteHour: Math.round((water.getPalette().hour || 0) * 100) / 100,
       audioReady: audio.ready,
       preset: audio.preset,
       moves: window.__flowMoves || 0

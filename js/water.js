@@ -26,8 +26,20 @@
     'uniform float uAspect;',
     'uniform float uCalm;      // 0 = 水景模式，1 = 白板模式',
     'uniform float uAmp;       // 涟漪总强度',
-    'uniform vec3  uMoon;      // 月光方向',
     'uniform vec4  uDrops[' + MAX_DROPS + ']; // xy=位置(渲染像素) z=出生时间 w=强度',
+    '',
+    '// 一天之内的光照，全部由 js/sun.js 的调色板喂进来',
+    'uniform vec3  uDeep;      // 深水底色',
+    'uniform vec3  uMid;       // 中景水色',
+    'uniform vec3  uSky;       // 天光/反射色',
+    'uniform vec3  uLightCol;  // 光源颜色（夜偏冷白，日出日落偏暖橙）',
+    'uniform vec3  uLightDir;  // 光源方向（仰角随时刻变）',
+    'uniform float uGlint;     // 镜面碎光强度',
+    'uniform float uSheen;     // 宽柔光强度',
+    'uniform float uAmb;       // 天光反射强度',
+    'uniform float uVig;       // 暗角下限（越大四角越亮）',
+    'uniform float uFar;       // 远处天光带强度',
+    'uniform float uPath;      // 光柱宽窄（越大越窄）',
     '',
     '#define DROPS ' + MAX_DROPS,
     '',
@@ -110,10 +122,10 @@
     '  float hc;',
     '  vec3 n = waterNormal(uv, t, eps, hc);',
     '',
-    '  vec3 deepC = vec3(0.014, 0.024, 0.038);',
-    '  vec3 midC  = vec3(0.052, 0.086, 0.112);',
-    '  vec3 skyC  = vec3(0.105, 0.158, 0.215);',
-    '  vec3 moonC = vec3(0.80, 0.87, 1.00);',
+    '  vec3 deepC = uDeep;',
+    '  vec3 midC  = uMid;',
+    '  vec3 skyC  = uSky;',
+    '  vec3 lightC = uLightCol;',
     '',
     '  vec3 V = normalize(vec3((uv - 0.5) * vec2(uAspect, 1.0) * 0.9, 1.0));',
     '',
@@ -121,25 +133,25 @@
     '  vec3 col = mix(deepC, midC, horizon * 0.95);',
     '  col += skyC * pow(horizon, 3.0) * 0.35;',
     '  // 远处水面映着天光，形成一道柔和亮带',
-    '  col += skyC * 0.22 * exp(-pow((uv.y - 0.94) * 8.0, 2.0));',
+    '  col += skyC * uFar * exp(-pow((uv.y - 0.94) * 8.0, 2.0));',
     '',
     '  // 大尺度涌浪的明暗，让水面有体积感',
     '  float gate = 1.0 - uCalm * 0.45;',
     '  col += skyC * hc * 2.5 * gate;',
     '',
-    '  // 月光在水面拉出的那条竖直光路：近处宽、远处窄，才是真实的锥形',
-    '  float kW = mix(3.0, 8.0, uv.y);',
+    '  // 光在水面拉出的那条竖直光路：近处宽、远处窄，才是真实的锥形',
+    '  float kW = mix(3.0, 8.0, uv.y) * uPath;',
     '  float path = exp(-pow((uv.x - 0.5) * kW, 2.0));',
     '  float glow = 1.0 - uCalm * 0.55;',
     '',
-    '  // 菲涅尔：掠射角更亮，且优先反射月光柱那一带的天光',
-    '  float fres = pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 3.5) * 0.62 * (0.25 + 0.75 * path);',
+    '  // 菲涅尔：掠射角更亮，且优先反射光柱那一带的天光',
+    '  float fres = min(1.0, pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 3.5) * 0.62 * uAmb * (0.25 + 0.75 * path));',
     '  col = mix(col, skyC * 1.25, fres);',
     '',
     '  // 镜面高光：法线被波纹扰动 → 碎成鳞片；R/B 用略微偏移的光向 → 色散彩边',
-    '  // 水平方向压扁法线＝掠射视角下光斑横向拉长，这才是月光带该有的形状',
+    '  // 水平方向压扁法线＝掠射视角下光斑横向拉长，这才是光带该有的形状',
     '  vec3 ng = normalize(vec3(n.x * 0.5, n.y, n.z));',
-    '  vec3 L = normalize(uMoon);',
+    '  vec3 L = normalize(uLightDir);',
     '  float ca = 0.012 * glow;',
     '  float sR = glintAt(ng, V, normalize(L + vec3( ca, 0.0, 0.0)));',
     '  float sG = glintAt(ng, V, L);',
@@ -149,16 +161,16 @@
     '  // 宽一点的柔光，避免只有碎点、没有整体亮度',
     '  vec3 H = normalize(L + V);',
     '  float sheen = pow(max(dot(n, H), 0.0), 26.0);',
-    '  col += moonC * sheen * 0.075 * (0.25 + 0.75 * path);',
+    '  col += lightC * sheen * uSheen * (0.25 + 0.75 * path);',
     '',
     '  // 波峰透光（近似次表面散射）',
-    '  col += moonC * max(hc, 0.0) * 3.0 * path * glow;',
+    '  col += lightC * max(hc, 0.0) * 3.0 * path * glow;',
     '',
-    '  col += moonC * glint * 1.70;',
+    '  col += lightC * glint * uGlint;',
     '',
     '  // 暗角',
     '  float vig = smoothstep(1.30, 0.28, length((uv - 0.5) * vec2(uAspect, 1.0)));',
-    '  col *= mix(0.60, 1.0, vig);',
+    '  col *= mix(uVig, 1.0, vig);',
     '',
     '  col *= mix(1.0, 0.52, uCalm);',
     '',
@@ -251,7 +263,15 @@
       isFallback: false,
       lastError: '',
       quality: quality,
-      onSeed: null        // 每帧回调，供外部注入涟漪
+      onSeed: null,       // 每帧回调，供外部注入涟漪
+      onFrame: null       // 每帧回调，供外部推进"一天之内的时间"（参数 dt 秒）
+    };
+
+    // 光照调色板：默认用深夜，避免外部还没喂数据时画面是错的
+    var palette = (window.Flow.Sun && window.Flow.Sun.palette(22)) || {
+      deep: [0.006, 0.012, 0.024], mid: [0.018, 0.032, 0.052], sky: [0.036, 0.056, 0.092],
+      light: [0.80, 0.88, 1.00], dir: [0, 0.607, 0.795],
+      glint: 1.70, sheen: 0.075, amb: 1.0, vig: 0.60, far: 0.22, path: 1.0
     };
 
     /* 挑一个渲染器 */
@@ -267,6 +287,16 @@
       if (!api.lastError) api.lastError = 'WebGL unavailable';
       renderer = create2D(canvas);
     }
+    if (renderer.applyPalette) renderer.applyPalette(palette);
+
+    /* 换一个时刻的光照（由 app.js 按真实时间或拨码算好再推过来） */
+    api.setPalette = function (p) {
+      if (!p) return;
+      palette = p;
+      if (renderer.applyPalette) renderer.applyPalette(p);
+    };
+
+    api.getPalette = function () { return palette; };
 
     function resize() {
       var rect = canvas.getBoundingClientRect();
@@ -290,6 +320,7 @@
       time += dt;
       calm += (calmTarget - calm) * Math.min(1, dt * 2.6);
 
+      if (api.onFrame) api.onFrame(dt);
       if (api.onSeed) api.onSeed(time);
       renderer.render(time, size, drops, calm, amp, cssW, cssH);
       api.perf(dt);
@@ -406,15 +437,39 @@
       aspect: gl.getUniformLocation(prog, 'uAspect'),
       calm: gl.getUniformLocation(prog, 'uCalm'),
       amp: gl.getUniformLocation(prog, 'uAmp'),
-      moon: gl.getUniformLocation(prog, 'uMoon'),
-      drops: gl.getUniformLocation(prog, 'uDrops[0]') || gl.getUniformLocation(prog, 'uDrops')
+      drops: gl.getUniformLocation(prog, 'uDrops[0]') || gl.getUniformLocation(prog, 'uDrops'),
+      deep: gl.getUniformLocation(prog, 'uDeep'),
+      mid: gl.getUniformLocation(prog, 'uMid'),
+      sky: gl.getUniformLocation(prog, 'uSky'),
+      lightCol: gl.getUniformLocation(prog, 'uLightCol'),
+      lightDir: gl.getUniformLocation(prog, 'uLightDir'),
+      glint: gl.getUniformLocation(prog, 'uGlint'),
+      sheen: gl.getUniformLocation(prog, 'uSheen'),
+      amb: gl.getUniformLocation(prog, 'uAmb'),
+      vig: gl.getUniformLocation(prog, 'uVig'),
+      far: gl.getUniformLocation(prog, 'uFar'),
+      path: gl.getUniformLocation(prog, 'uPath')
     };
 
     gl.clearColor(0.016, 0.027, 0.043, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform3f(U.moon, 0.0, 0.42, 0.55);
+
+    function applyPalette(P) {
+      gl.uniform3fv(U.deep, P.deep);
+      gl.uniform3fv(U.mid, P.mid);
+      gl.uniform3fv(U.sky, P.sky);
+      gl.uniform3fv(U.lightCol, P.light);
+      gl.uniform3fv(U.lightDir, P.dir);
+      gl.uniform1f(U.glint, P.glint);
+      gl.uniform1f(U.sheen, P.sheen);
+      gl.uniform1f(U.amb, P.amb);
+      gl.uniform1f(U.vig, P.vig);
+      gl.uniform1f(U.far, P.far);
+      gl.uniform1f(U.path, P.path);
+    }
 
     return {
+      applyPalette: applyPalette,
       resize: function (cssW, cssH, w, h) {
         canvas.width = w;
         canvas.height = h;
@@ -444,8 +499,21 @@
     var ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');
     var sx = 1, sy = 1;
+    var pal = null;
+
+    function rgb(c, k) {
+      return 'rgb(' + Math.round(Math.min(1, c[0] * k) * 255) + ',' +
+        Math.round(Math.min(1, c[1] * k) * 255) + ',' +
+        Math.round(Math.min(1, c[2] * k) * 255) + ')';
+    }
+    function rgba(c, k, a) {
+      return 'rgba(' + Math.round(Math.min(1, c[0] * k) * 255) + ',' +
+        Math.round(Math.min(1, c[1] * k) * 255) + ',' +
+        Math.round(Math.min(1, c[2] * k) * 255) + ',' + a + ')';
+    }
 
     return {
+      applyPalette: function (p) { pal = p; },
       resize: function (cssW, cssH, w, h) {
         canvas.width = w;
         canvas.height = h;
@@ -456,20 +524,27 @@
       },
       render: function (t, size, drops, calm) {
         var w = size.w, h = size.h;
+        var deep = pal ? pal.deep : [0.006, 0.012, 0.024];
+        var mid = pal ? pal.mid : [0.018, 0.032, 0.052];
+        var sky = pal ? pal.sky : [0.036, 0.056, 0.092];
+        var lightC = pal ? pal.light : [0.80, 0.88, 1.00];
+        var vig = pal ? pal.vig : 0.60;
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalCompositeOperation = 'source-over';
 
+        // 底色也跟着时刻走（降级路径同样有昼夜）
         var g = ctx.createLinearGradient(0, h, 0, 0);
-        g.addColorStop(0, '#05080e');
-        g.addColorStop(0.55, '#081320');
-        g.addColorStop(1, '#0b1a29');
+        g.addColorStop(0, rgb(deep, 1.0));
+        g.addColorStop(0.55, rgb(mid, 1.0));
+        g.addColorStop(1, rgb(mid, 1.9));
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
 
-        // 月光柱
+        // 光柱（白天是日光，夜里是月光）
         var mg = ctx.createRadialGradient(w * 0.5, -h * 0.15, 0, w * 0.5, -h * 0.15, h * 0.95);
-        mg.addColorStop(0, 'rgba(150,185,235,' + (0.30 * (1 - calm * 0.6)) + ')');
-        mg.addColorStop(0.45, 'rgba(90,125,180,' + (0.10 * (1 - calm * 0.6)) + ')');
+        mg.addColorStop(0, rgba(lightC, 1, (0.30 * (1 - calm * 0.6)).toFixed(3)));
+        mg.addColorStop(0.45, rgba(sky, 1.4, (0.16 * (1 - calm * 0.6)).toFixed(3)));
         mg.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = mg;
         ctx.fillRect(0, 0, w, h);
@@ -487,17 +562,17 @@
             if (r <= 1) continue;
             var a = Math.exp(-age * 1.5) * Math.exp(-r / (size.h * 0.55)) * 0.5 * d.w * 18;
             if (a <= 0.002) continue;
-            ctx.strokeStyle = 'rgba(178,206,246,' + a.toFixed(3) + ')';
+            ctx.strokeStyle = rgba(lightC, 1, a.toFixed(3));
             ctx.beginPath();
             ctx.arc(cx, cy, r, 0, Math.PI * 2);
             ctx.stroke();
           }
         }
 
-        // 暗角
+        // 暗角（下限随时刻变，白天四角更亮）
         var v = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.15, w * 0.5, h * 0.5, h * 1.05);
         v.addColorStop(0, 'rgba(0,0,0,0)');
-        v.addColorStop(1, 'rgba(0,0,0,0.62)');
+        v.addColorStop(1, 'rgba(0,0,0,' + (0.62 * vig / 0.60).toFixed(3) + ')');
         ctx.fillStyle = v;
         ctx.fillRect(0, 0, w, h);
 
