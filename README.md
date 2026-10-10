@@ -18,12 +18,19 @@
 
 **方式一：直接打开线上版** —— <https://forbitliang.github.io/webflow/>
 
-**方式二：本地双击 `index.html`** —— 用的是传统 `<script>`（非 ES module），`file://` 下也能跑。
+**方式二：本地双击 `index.html`** —— 用的是传统 `<script>`（非 ES module），`file://` 下也能跑。快速看一眼足够了；但浏览器的 `file://` 存储策略可能让白板内容无法跨刷新保存，要持久化就用下面两种方式。
 
-**方式三：起个本地服务**（行为和线上一致，改完立刻能看到）
+**方式三：一键启动本地服务**（行为和线上一致，白板内容能正常保存）
 
 ```powershell
-# 在 project/flow 目录下
+# 在 project/flow 目录下，右键「启动预览.ps1」→ 使用 PowerShell 运行
+# 或者：
+powershell -ExecutionPolicy Bypass -File "启动预览.ps1"
+```
+
+脚本会起服务并自动打开浏览器，**关掉那个窗口就停止**。等价的手工命令：
+
+```powershell
 python -m http.server 8848
 # 打开 http://127.0.0.1:8848/
 ```
@@ -194,6 +201,7 @@ flow/
 │   ├── preview.js      着色器的 CPU 等价实现，离线渲染调参
 │   └── selftest.js     纯逻辑自检（180 项）
 ├── docs/               预览截图
+├── 启动预览.ps1         本地起服务并打开浏览器
 └── 发布到GitHub.ps1     一键发布到 GitHub Pages
 ```
 
