@@ -1,5 +1,9 @@
 # flow — 一池水，一点声音，一块白板
 
+> ### 🔗 在线访问 → **<https://forbitliang.github.io/webflow/>**
+>
+> 托管在 GitHub Pages。手机也能开，但触摸端没有 hover，涟漪要拖动才出。
+
 一个可以长期挂着的网页：背景是程序化生成的月光湖面，鼠标划过会泛起涟漪；播放程序化合成的环境音；按一个键就能切到白板，写字、摆字块、连线。**零依赖 · 零构建 · 零外部资源 · 无版权风险。**
 
 ![水面](docs/preview-water.png)
@@ -10,9 +14,11 @@
 
 ## 快速开始
 
-**方式一：直接双击 `index.html`** —— 用的是传统 `<script>`（非 ES module），`file://` 下也能跑。
+**方式一：直接打开线上版** —— <https://forbitliang.github.io/webflow/>
 
-**方式二：起个本地服务**（推荐，行为和线上一致）
+**方式二：本地双击 `index.html`** —— 用的是传统 `<script>`（非 ES module），`file://` 下也能跑。
+
+**方式三：起个本地服务**（行为和线上一致，改完立刻能看到）
 
 ```powershell
 # 在 project/flow 目录下
