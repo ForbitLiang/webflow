@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#04070c">
 <meta name="description" content="flow — 一池水，一点声音，一块白板。为专注与捕捉想法而生。">
 <title>flow — 一池水，一点声音，一块白板</title>
-<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=7">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23bcd6ff'/></svg>">
 </head>
 <body class="is-loading">
@@ -50,36 +50,37 @@
   </header>
 
   <div class="row row-mid-left">
-    <!-- 湖面时间拨码：竖在左边，往上拨是凌晨、往下拨是深夜 -->
-    <div class="sun" id="sun-panel">
-      <button type="button" id="sun-auto" class="sun-auto on" aria-pressed="true"
-              title="跟随当前时间">自动</button>
+    <p class="clock" id="clock" title="按 T 显示 / 隐藏">
+      <span class="clock-time" id="clock-text">--:--:--</span>
+      <span class="clock-ampm" id="clock-ampm">p.m.</span>
+    </p>
+
+    <nav class="hints" aria-label="快捷键">
+      <button type="button" data-act="board"><kbd>B</kbd> 白板</button>
+      <button type="button" data-act="clock"><kbd>T</kbd> 时间</button>
+      <button type="button" data-act="preset"><kbd>S</kbd> 音景</button>
+      <button type="button" data-act="mute"><kbd>M</kbd> 静音</button>
+      <button type="button" data-act="hide"><kbd>H</kbd> 隐藏界面</button>
+    </nav>
+  </div>
+
+  <!-- 湖面时间拨码：竖在页面最右端，上端凌晨、下端深夜。
+       position: fixed 让它脱离 #ui 的纵向 flex 流，不会把顶部/底部两行挤开。 -->
+  <div class="sun" id="sun-panel">
+    <button type="button" id="sun-auto" class="sun-auto on" aria-pressed="true"
+            title="跟随当前时间">自动</button>
+    <div class="sun-body">
       <div class="sun-slider">
         <input type="range" id="sun-range" min="0" max="1439" step="5" value="720"
                aria-label="湖面时间（上下拖动可预览一天里不同时刻的水面）">
-        <div class="sun-ticks" aria-hidden="true">
-          <span>0</span><span>6</span><span>12</span><span>18</span><span>24</span>
-        </div>
       </div>
-      <div class="sun-label">
-        <span class="sun-time" id="sun-time">--:--</span>
-        <span class="sun-phase" id="sun-phase">--</span>
+      <div class="sun-ticks" aria-hidden="true">
+        <span>0</span><span>6</span><span>12</span><span>18</span><span>24</span>
       </div>
     </div>
-
-    <div class="left-stack">
-      <p class="clock" id="clock" title="按 T 显示 / 隐藏">
-        <span class="clock-time" id="clock-text">--:--:--</span>
-        <span class="clock-ampm" id="clock-ampm">p.m.</span>
-      </p>
-
-      <nav class="hints" aria-label="快捷键">
-        <button type="button" data-act="board"><kbd>B</kbd> 白板</button>
-        <button type="button" data-act="clock"><kbd>T</kbd> 时间</button>
-        <button type="button" data-act="preset"><kbd>S</kbd> 音景</button>
-        <button type="button" data-act="mute"><kbd>M</kbd> 静音</button>
-        <button type="button" data-act="hide"><kbd>H</kbd> 隐藏界面</button>
-      </nav>
+    <div class="sun-label">
+      <span class="sun-time" id="sun-time">--:--</span>
+      <span class="sun-phase" id="sun-phase">--</span>
     </div>
   </div>
 
@@ -178,14 +179,14 @@
 <!-- 错误提示条（同时用于自动化检查） -->
 <div id="err" role="alert" hidden></div>
 
-<script src="js/store.js?v=6" defer></script>
-<script src="js/camera.js?v=6" defer></script>
-<script src="js/sun.js?v=6" defer></script>
-<script src="js/water.js?v=6" defer></script>
-<script src="js/audio.js?v=6" defer></script>
-<script src="js/board.js?v=6" defer></script>
-<script src="js/blocks.js?v=6" defer></script>
-<script src="js/app.js?v=6" defer></script>
+<script src="js/store.js?v=7" defer></script>
+<script src="js/camera.js?v=7" defer></script>
+<script src="js/sun.js?v=7" defer></script>
+<script src="js/water.js?v=7" defer></script>
+<script src="js/audio.js?v=7" defer></script>
+<script src="js/board.js?v=7" defer></script>
+<script src="js/blocks.js?v=7" defer></script>
+<script src="js/app.js?v=7" defer></script>
 <input type="file" id="file-input" accept=".json,.excalidraw,application/json" hidden>
 </body>
 </html>
