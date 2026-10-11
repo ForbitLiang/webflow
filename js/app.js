@@ -699,6 +699,50 @@
     showStatus(audio.muted ? '已静音' : '声音已开');
   }
 
+  /* ── 全屏 ───────────────────────────────────────────────── */
+
+  var fsBtn = $('fs-btn');
+
+  function fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+  function isFullscreen() { return !!fsElement(); }
+
+  function updateFsUI() {
+    var on = isFullscreen();
+    document.body.classList.toggle('is-fullscreen', on);
+    if (fsBtn) {
+      fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      fsBtn.title = on ? '退出全屏 (F)' : '全屏 (F)';
+      fsBtn.setAttribute('aria-label', on ? '退出全屏' : '全屏');
+    }
+  }
+
+  function toggleFullscreen() {
+    var el = document.documentElement;
+    if (isFullscreen()) {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) {
+        var pe = exit.call(document);
+        if (pe && pe.catch) pe.catch(function () {});
+      }
+      return;
+    }
+    var req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) { showStatus('这个浏览器不支持全屏'); return; }
+    // 浏览器可能因为不是用户手势而拒绝，这里必须接住，否则控制台会多一条未捕获异常
+    var pr = req.call(el);
+    if (pr && pr.catch) {
+      pr.catch(function () { showStatus('全屏被浏览器拒绝了', 2600); });
+    }
+  }
+
+  if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) {
+    document.addEventListener(ev, updateFsUI);
+  });
+  updateFsUI();
+
   /* ── 工具 ───────────────────────────────────────────────── */
 
   var TOOL_BTNS = '#toolbar [data-tool="select"], #toolbar [data-tool="pen"], ' +
@@ -1298,6 +1342,7 @@
         }
         break;
       case 'm': toggleMute(); e.preventDefault(); break;
+      case 'f': toggleFullscreen(); e.preventDefault(); break;
       case 't': toggleClock(); e.preventDefault(); break;
       case 'h':
         manualHidden = !manualHidden;
@@ -1715,6 +1760,35 @@
         out.menuClosed = !isExportMenuOpen();
         out.expandedAfter = exportBtn.getAttribute('aria-expanded');
         out.toolbarBtns = document.querySelectorAll('#toolbar button').length;
+      }
+
+      /* 全屏按钮自检：贴在右下角，且**两种模式下都点得到**。
+         这是它被放在 #ui 外面的原因——#ui 的 z-index(6) 低于分页标签(7)，
+         而分页标签铺满底部且 pointer-events: auto，放在里面会被拦走点击。
+         所以必须用 elementFromPoint 验一遍，光看坐标不算数。 */
+      var fsB = $('fs-btn');
+      if (fsB) {
+        var fr = fsB.getBoundingClientRect();
+        var fcx = fr.left + fr.width / 2, fcy = fr.top + fr.height / 2;
+        var fsHit = function () {
+          var el = document.elementFromPoint(fcx, fcy);
+          return !!(el && (el === fsB || fsB.contains(el)));
+        };
+        setMode('water');
+        out.fsHitWater = fsHit();
+        setMode('board');
+        out.fsHitBoard = fsHit();
+        out.fsInView = fr.left >= 0 && fr.top >= 0 &&
+          fr.right <= window.innerWidth && fr.bottom <= window.innerHeight;
+        out.fsCornerOffset = Math.round(window.innerWidth - fr.right) + 'x' +
+          Math.round(window.innerHeight - fr.bottom);   // 距右下角的距离
+        out.fsIconExpand = getComputedStyle(fsB.querySelector('.fs-icon-expand')).display !== 'none';
+        // 按 F 不应抛出未捕获异常（headless 下 requestFullscreen 可能被拒）
+        var fsErrBefore = (window.Flow.__errors || []).length;
+        window.dispatchEvent(new KeyboardEvent('keydown',
+          { key: 'f', code: 'KeyF', bubbles: true, cancelable: true }));
+        out.fsKeyErrors = (window.Flow.__errors || []).length - fsErrBefore;
+        setMode('board');
       }
 
       /* 框选 + 整组移动自检：走真实代码路径（合成指针事件 + 直接调 API 各验一半） */

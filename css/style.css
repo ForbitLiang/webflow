@@ -612,6 +612,51 @@ body.mode-board .keys-hint { opacity: 1; visibility: visible; }
 }
 .status.show { opacity: 1; }
 
+/* ── 全屏按钮（窗口最右下角） ───────────────────────────────── */
+.fs-btn {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  /* 8 = 在 #ui(6) 与分页标签(7) 之上、进入页(9) 之下 */
+  z-index: 8;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  appearance: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(10, 18, 28, .5);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color .2s var(--ease), border-color .2s var(--ease),
+              background .2s var(--ease), opacity .45s var(--ease), visibility .45s;
+}
+.fs-btn:hover {
+  color: var(--ink);
+  border-color: var(--glass-line);
+  background: rgba(159, 196, 255, .14);
+}
+.fs-btn:focus-visible { outline: 2px solid rgba(159, 196, 255, .6); outline-offset: 2px; }
+.fs-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fs-btn .fs-icon-compress { display: none; }
+body.is-fullscreen .fs-btn .fs-icon-expand { display: none; }
+body.is-fullscreen .fs-btn .fs-icon-compress { display: block; }
+
+/* 它在 #ui 外面，所以要自己响应"隐藏界面"（按 H 或挂机 24 秒） */
+body.ui-hidden .fs-btn { opacity: 0; visibility: hidden; }
+
 /* ── 分页标签（像 Excel 的 sheet，贴在窗口最底） ─────────────── */
 #sheets {
   position: fixed;
@@ -623,7 +668,8 @@ body.mode-board .keys-hint { opacity: 1; visibility: visible; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 10px 0 12px;
+  /* 右侧给全屏按钮留位，页签多到滚动时不会钻到按钮底下 */
+  padding: 0 58px 0 12px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
