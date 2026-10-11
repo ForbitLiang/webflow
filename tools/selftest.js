@@ -690,8 +690,11 @@ ok('远离曲线的点距离很大', G.distToCubicSq(50, 300, ca, cc1, cc2, cb) 
 const lim = G.clampSharedDelta([100, 200, 300], 0, 400);
 ok('共享位移上限由最靠右的对象决定', lim.max === 100, lim.max);
 ok('共享位移下限由最靠左的对象决定', lim.min === -100, lim.min);
+ok('装得下时 fits=true', lim.fits === true);
 const lim2 = G.clampSharedDelta([0, 1000], 0, 400);
-ok('区间冲突时退化为单点（不产生非法区间）', lim2.min <= lim2.max, JSON.stringify(lim2));
+ok('装不下时 fits=false（调用方据此跳过夹取，否则拖动会不跟手）',
+  lim2.fits === false, JSON.stringify(lim2));
+ok('装不下时仍给出合法区间（不产生 min>max）', lim2.min <= lim2.max, JSON.stringify(lim2));
 ok('空集合不崩', (() => {
   const r = G.clampSharedDelta([], 0, 100);
   return r.min <= r.max;

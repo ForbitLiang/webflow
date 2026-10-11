@@ -116,7 +116,9 @@
   }
 
   /* 把共享位移限制住，使一组起点平移后仍全部落在范围内。
-     返回可用的 dx（或 dy）区间，避免"抓着最上面那个块拖，其余块飞出屏幕"。 */
+     返回可用的 dx（或 dy）区间，避免"抓着最上面那个块拖，其余块飞出屏幕"。
+     fits=false 表示这组对象本身就装不进给定范围——调用方应当据此**放弃夹取**，
+     否则位移会被固定成一个与鼠标无关的定值，拖起来不跟手。 */
   function clampSharedDelta(starts, lo, hi) {
     var dMin = -Infinity, dMax = Infinity;
     for (var i = 0; i < starts.length; i++) {
@@ -125,8 +127,9 @@
       if (lo - v > dMin) dMin = lo - v;
       if (hi - v < dMax) dMax = hi - v;
     }
-    if (dMin > dMax) { var mid = (dMin + dMax) / 2; dMin = dMax = mid; }
-    return { min: dMin, max: dMax };
+    var fits = dMin <= dMax;
+    if (!fits) { var mid = (dMin + dMax) / 2; dMin = dMax = mid; }
+    return { min: dMin, max: dMax, fits: fits };
   }
 
   window.Flow.Geom = {

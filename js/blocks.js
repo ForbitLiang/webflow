@@ -453,7 +453,10 @@
       return Object.keys(moveStart).length;
     };
 
-    /* 把位移夹在"所有选中块都还在可视范围内"的区间里 */
+    /* 把位移夹在"所有选中块都还在可视范围内"的区间里。
+       但整组本来就装不进可视范围时（比如放大到 300% 后选中了相隔很远的几块），
+       夹取会把位移固定成一个与鼠标无关的定值 —— 拖起来"不跟手"。
+       这种情况直接不夹，让它们自由移动，反正随时可以缩小或按 ⤢ 找回内容。 */
     api.clampMove = function (dx, dy) {
       if (!moveStart) return { dx: dx, dy: dy };
       var G = window.Flow.Geom;
@@ -465,6 +468,7 @@
       });
       var rx = G.clampSharedDelta(xs, rng.x0, rng.x1);
       var ry = G.clampSharedDelta(ys, rng.y0, rng.y1);
+      if (!rx.fits || !ry.fits) return { dx: dx, dy: dy };
       return {
         dx: clamp(dx, rx.min, rx.max),
         dy: clamp(dy, ry.min, ry.max)
@@ -897,19 +901,16 @@
       };
     };
 
-    /* 窗口或视图变化后把跑到视野外的块拉回来 */
-    function reclamp() {
-      var rng = visibleRange();
-      var moved = false;
-      blocks.forEach(function (b) {
-        var nx = clamp(b.x, rng.x0, rng.x1), ny = clamp(b.y, rng.y0, rng.y1);
-        if (nx !== b.x || ny !== b.y) { b.x = nx; b.y = ny; moved = true; }
-      });
-      if (moved) changed();
-    }
+    /* 窗口尺寸变化时**只重画，绝不改动块的坐标**。
 
+       这里原本有个 reclamp()：把超出"当前可视场景范围"的块夹回边界。
+       那是错的——块的坐标是场景坐标，与窗口大小无关。窗口一变窄
+       （比如把浏览器贴到屏幕左半边），可视范围随之变小，所有落在范围外的
+       块就被一起拉到边界上，叠成一堆。它把视图状态写进了用户数据。
+
+       内容跑到视野外是正常且可恢复的：滚轮缩放、空格拖动平移、或点工具条的
+       ⤢ 一键装下全部内容。 */
     window.addEventListener('resize', function () {
-      reclamp();
       render();
     });
 

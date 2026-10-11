@@ -1625,6 +1625,29 @@
       out.shift3Ink = board.getInk();
       setInk(0);
 
+      /* 窗口尺寸变化不得改动块的场景坐标。
+         这里用"相机放大"等价缩小可视范围（visibleRange 同时依赖窗口和相机），
+         再派发真实的 resize 事件。
+         原 bug：resize 时有个 reclamp() 把超出可视范围的块夹回边界，于是把
+         浏览器贴到屏幕半边时，所有落在范围外的块会叠到边上挤成一堆。 */
+      var rclBlock = blocks.addBlock(500, 400, '不该被移动');
+      var coordOf = function () {
+        return blocks.getBlocks().map(function (b) {
+          return Math.round(b.x) + ',' + Math.round(b.y);
+        }).join('|');
+      };
+      var coordsBefore = coordOf();
+      var zoomWas2 = camera.scale;
+      camera.set(camera.x, camera.y, 3);        // 放大 3 倍 → 可视场景范围缩小
+      window.dispatchEvent(new Event('resize'));
+      var coordsAfter = coordOf();
+      out.resizeKeepsCoords = coordsAfter === coordsBefore;
+      // 顺带确认这块确实落到了可视范围外（否则这条断言是空转）
+      out.resizeBlockOutsideView =
+        rclBlock.x < camera.toSceneX(0) || rclBlock.x > camera.toSceneX(window.innerWidth) ||
+        rclBlock.y < camera.toSceneY(0) || rclBlock.y > camera.toSceneY(window.innerHeight);
+      camera.set(camera.x, camera.y, zoomWas2);
+
       /* 快捷键提示的位置自检：必须在工具条下方、分页标签上方，三者不重叠。
 
          这里**不能**用 getBoundingClientRect 比较：工具条是靠 CSS 过渡从屏外
