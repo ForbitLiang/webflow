@@ -96,7 +96,7 @@ ok('缺失宽度倍数时回落到 1', S.unpackStrokes([{ c: '#fff', w: 2, e: 0,
 
 console.log('\n[2] 场景持久化');
 const blocks = [
-  { id: 'a', x: 300.4, y: 200.6, text: '第一个念头', color: 1 },
+  { id: 'a', x: 300.4, y: 200.6, text: '第一个念头', color: 1, strike: 1 },
   { id: 'b', x: 700, y: 150, text: '第二个\n换行', color: 0 }
 ];
 const edges = [{ id: 'e1', from: 'a', to: 'b' }];
@@ -112,6 +112,8 @@ ok('连线条数一致', scene.edges.length === 1, scene.edges.length);
 ok('字块文字保留（含换行）', scene.blocks[1].text === '第二个\n换行', JSON.stringify(scene.blocks[1].text));
 ok('字块颜色保留', scene.blocks[0].color === 1, scene.blocks[0].color);
 ok('坐标四舍五入到 1 位小数', Math.abs(scene.blocks[0].x - 300.4) < 1e-9, scene.blocks[0].x);
+ok('删除线标记保留', scene.blocks[0].strike === 1, scene.blocks[0].strike);
+ok('没划掉的块 strike 是 0 而不是 undefined', scene.blocks[1].strike === 0, scene.blocks[1].strike);
 
 /* ── 3. 数据清洗 ────────────────────────────────────────── */
 
@@ -119,7 +121,7 @@ console.log('\n[3] 脏数据清洗');
 const dirty = S.saveScene({
   strokes: [],
   blocks: [
-    { id: 'ok', x: 10, y: 20, text: 'x' },
+    { id: 'ok', x: 10, y: 20, text: 'x', strike: 'yes' },
     { id: 'bad', x: 'NaN', y: 20, text: 'y' },
     { id: 'bad2', y: 20 }
   ],
@@ -133,6 +135,7 @@ ok('保存不抛异常', dirty.ok === true);
 const clean = S.loadScene();
 ok('非有限坐标的块被丢掉', clean.blocks.length === 1, clean.blocks.length);
 ok('自环与悬空连线被丢掉', clean.edges.length === 0, clean.edges.length);
+ok('非法的 strike 被规整成 0/1', clean.blocks[0].strike === 1, JSON.stringify(clean.blocks[0].strike));
 
 /* ── 4. 旧版本（只有笔迹）自动迁移 ───────────────────────── */
 
@@ -214,6 +217,7 @@ if (proj) {
   ok('往返后第 1 页内容一致',
     proj.sheets[0].strokes.length === 3 && proj.sheets[0].blocks.length === 2 && proj.sheets[0].edges.length === 1);
   ok('往返后第 2 页仍是独立的', proj.sheets[1].blocks[0].text === '别的页');
+  ok('往返后删除线保留', proj.sheets[0].blocks[0].strike === 1, proj.sheets[0].blocks[0].strike);
 }
 ok('也能解析 v2 单页工程文件', S.parseProject(JSON.stringify({ v: 2, strokes: strokes, blocks: blocks })).sheets.length === 1);
 let badProj = false;

@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#04070c">
 <meta name="description" content="flow — 一池水，一点声音，一块白板。为专注与捕捉想法而生。">
 <title>flow — 一池水，一点声音，一块白板</title>
-<link rel="stylesheet" href="css/style.css?v=15">
+<link rel="stylesheet" href="css/style.css?v=16">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23bcd6ff'/></svg>">
 </head>
 <body class="is-loading">
@@ -73,7 +73,7 @@
   <p class="keys-hint" id="keys-hint" aria-hidden="true">
     <kbd>1</kbd>选择 <kbd>2</kbd>画笔 <kbd>3</kbd>橡皮 <kbd>4</kbd>文字
     <span class="keys-sep"></span>
-    <kbd>Shift</kbd>+<kbd>1</kbd>~<kbd>3</kbd> 颜色
+    <kbd>Shift</kbd>+<kbd>1</kbd>~<kbd>3</kbd> 颜色 <kbd>Shift</kbd>+<kbd>X</kbd> 删除线
   </p>
 
   <!-- 湖面时间拨码：竖在页面最右端，上端凌晨、下端深夜。
@@ -140,6 +140,9 @@
     <button type="button" class="sw" data-ink="1" title="暖月黄 (Shift+2)"><i style="--c:#ffd9a0"></i></button>
     <button type="button" class="sw" data-ink="2" title="冷青 (Shift+3)"><i style="--c:#9fe8e0"></i></button>
   </div>
+  <button type="button" data-tool="strike" title="删除线 (Shift+X)：划掉选中的字块，再按一次取消">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13.6 6.4c-.6-1.2-1.9-1.9-3.4-1.9-1.9 0-3.2 1-3.2 2.5 0 1.2.7 1.9 2.6 2.4 2 .5 3.1 1.2 3.1 2.6 0 1.6-1.4 2.6-3.5 2.6-1.7 0-3-.7-3.6-2M3 10h14"/></svg><span>删除线</span>
+  </button>
   <span class="tool-sep"></span>
   <button type="button" data-tool="undo" title="撤销 (Ctrl+Z)">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6H12.5A3.5 3.5 0 0 1 16 9.5v0A3.5 3.5 0 0 1 12.5 13H9M7 6l3-3M7 6l3 3"/></svg><span>撤销</span>
@@ -211,15 +214,15 @@
 <!-- 错误提示条（同时用于自动化检查） -->
 <div id="err" role="alert" hidden></div>
 
-<script src="js/store.js?v=15" defer></script>
-<script src="js/camera.js?v=15" defer></script>
-<script src="js/geom.js?v=15" defer></script>
-<script src="js/sun.js?v=15" defer></script>
-<script src="js/water.js?v=15" defer></script>
-<script src="js/audio.js?v=15" defer></script>
-<script src="js/board.js?v=15" defer></script>
-<script src="js/blocks.js?v=15" defer></script>
-<script src="js/app.js?v=15" defer></script>
+<script src="js/store.js?v=16" defer></script>
+<script src="js/camera.js?v=16" defer></script>
+<script src="js/geom.js?v=16" defer></script>
+<script src="js/sun.js?v=16" defer></script>
+<script src="js/water.js?v=16" defer></script>
+<script src="js/audio.js?v=16" defer></script>
+<script src="js/board.js?v=16" defer></script>
+<script src="js/blocks.js?v=16" defer></script>
+<script src="js/app.js?v=16" defer></script>
 <input type="file" id="file-input" accept=".json,.excalidraw,application/json" hidden>
 </body>
 </html>

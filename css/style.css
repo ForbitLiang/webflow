@@ -179,6 +179,13 @@ body.mode-board #nodes { opacity: 1; }
 }
 .node.dragging { cursor: grabbing; }
 
+/* 删除线：整块划掉（一个块 = 一个念头，划掉就是划掉整块） */
+.node.strike .node-text {
+  text-decoration: line-through;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1.5px;
+}
+
 .node-text {
   outline: none;
   white-space: pre-wrap;

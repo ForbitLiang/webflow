@@ -94,7 +94,8 @@
         x: Number(b.x),
         y: Number(b.y),
         text: String(b.text == null ? '' : b.text),
-        color: b.color | 0
+        color: b.color | 0,
+        strike: b.strike ? 1 : 0
       };
     });
   }

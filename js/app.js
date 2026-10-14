@@ -97,7 +97,7 @@
   }
   function cloneBlocks(list) {
     return (list || []).map(function (b) {
-      return { id: b.id, x: b.x, y: b.y, text: b.text, color: b.color || 0 };
+      return { id: b.id, x: b.x, y: b.y, text: b.text, color: b.color || 0, strike: b.strike ? 1 : 0 };
     });
   }
   function cloneEdges(list) {
@@ -777,6 +777,22 @@
     Flow.Store.savePrefs(prefs);
   }
 
+  /* 删除线：对选中的字块整块划掉 / 取消。
+     没选中字块时给提示而不是静默失败 —— 否则按了没反应会以为快捷键坏了。 */
+  function toggleStrike() {
+    if (state !== 'board') return;
+    var r = blocks.toggleStrike();
+    if (r.n < 0) {
+      showStatus('先选中要划掉的字块（选择工具下可框选多个）', 3600);
+      return;
+    }
+    if (r.n === 0) {
+      showStatus(r.on ? '这些块已经划掉了' : '这些块本来就没有删除线', 2400);
+      return;
+    }
+    showStatus((r.on ? '已划掉 ' : '已取消删除线 ') + r.n + ' 个块（可 Ctrl+Z 撤销）');
+  }
+
   function doUndo() {
     if (blocks.undo()) { showStatus('撤销'); return; }
     if (board.undo()) { showStatus('撤销'); return; }
@@ -1213,6 +1229,9 @@
           setTool('text');
           blocks.addBlockAtCenter();
           break;
+        case 'strike':
+          toggleStrike();
+          break;
         case 'undo':
           doUndo();
           break;
@@ -1317,6 +1336,8 @@
       if (e.shiftKey) {
         var ink = INK_BY_CODE[code];
         if (ink != null) { setInk(ink); e.preventDefault(); return; }
+        // Shift+X：删除线（X 是文字工具，同键位加 Shift 就是"划掉"）
+        if (code === 'KeyX') { toggleStrike(); e.preventDefault(); return; }
       } else {
         var toolByKey = TOOL_BY_CODE[code];
         if (toolByKey) { setTool(toolByKey); e.preventDefault(); return; }
@@ -1524,6 +1545,20 @@
     }, 300);
   }
 
+  /* 深链：?strike=1 演示删除线（划掉一块，用于截图与肉眼确认） */
+  if (params.get('strike') === '1') {
+    setMode('board');
+    setTimeout(function () {
+      var cx = Math.round(window.innerWidth / 2), cy = Math.round(window.innerHeight / 2);
+      var done = blocks.addBlock(cx - 170, cy - 60, '已经做完的事');
+      blocks.addBlock(cx + 170, cy - 60, '还没做的');
+      blocks.toggleSelection('block', done.id);
+      blocks.setStrike(1);
+      blocks.clearSelection();
+      showStatus('删除线演示：划掉的那块可 Ctrl+Z 撤销', 6000);
+    }, 300);
+  }
+
   /* 深链：?menu=1 直接展开导出菜单（也用于自动化截图） */
   if (params.get('menu') === '1') {
     setMode('board');
@@ -1669,6 +1704,25 @@
       window.dispatchEvent(kev('Digit3', '#', true));
       out.shift3Ink = board.getInk();
       setInk(0);
+
+      /* 删除线自检：Shift+X 走真实快捷键路径，验模型 / DOM 类 / 二次切换 / 撤销。
+         注意这里必须选中块之后才按——没选中时会走"提示"分支，什么都不会变。 */
+      var sb = blocks.addBlock(640, 320, '划掉我');
+      var strikeOf = function (id) {
+        var hit = blocks.getBlocks().filter(function (x) { return x.id === id; })[0];
+        return hit ? (hit.strike | 0) : -1;
+      };
+      blocks.toggleSelection('block', sb.id);
+      window.dispatchEvent(kev('KeyX', 'X', true));      // Shift+X → 划掉
+      var sbEl = document.querySelector('#nodes .node[data-id="' + sb.id + '"]');
+      out.strikeOn = strikeOf(sb.id) === 1;
+      out.strikeClass = !!(sbEl && sbEl.classList.contains('strike'));
+      window.dispatchEvent(kev('KeyX', 'X', true));      // 已全划上 → 再按一次全取消
+      out.strikeOff = strikeOf(sb.id) === 0;
+      window.dispatchEvent(kev('KeyX', 'X', true));      // 再划上，然后撤销
+      doUndo();
+      out.strikeUndo = strikeOf(sb.id) === 0;
+      blocks.toggleSelection('block', sb.id);            // 取消选中，别影响后面的断言
 
       /* 窗口尺寸变化不得改动块的场景坐标。
          这里用"相机放大"等价缩小可视范围（visibleRange 同时依赖窗口和相机），

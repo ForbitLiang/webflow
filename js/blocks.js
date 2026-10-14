@@ -290,6 +290,7 @@
           if (t.textContent !== b.text) t.textContent = b.text;
         }
         el.classList.toggle('sel', !!sel.blocks[b.id]);
+        el.classList.toggle('strike', !!b.strike);
       }
       Object.keys(els).forEach(function (id) {
         if (!seen[id]) {
@@ -708,6 +709,45 @@
     };
     api.getColor = function () { return colorIndex; };
 
+  /* ── 删除线 ───────────────────────────────────────────────
+     块级开关（不是富文本）：一个块 = 一个念头，划掉就整块划掉。
+     这样数据模型只是一个布尔字段，撤销 / 持久化 / PNG 导出都只需动一处。
+     返回值：n = 真正变化的块数（-1 表示没有选中字块），on = 切换后的状态。
+     ──────────────────────────────────────────────────────── */
+
+  api.setStrike = function (v) {
+    var ids = selIds('block');
+    if (!ids.length) return -1;
+    var want = !!v;
+    var n = 0;
+    ids.forEach(function (id) {
+      var b = byId(id);
+      if (b && (!!b.strike) !== want) n++;
+    });
+    if (!n) return 0;
+    pushUndo(snapshot());
+    ids.forEach(function (id) {
+      var b = byId(id);
+      if (b) b.strike = want ? 1 : 0;
+    });
+    render();
+    changed();
+    return n;
+  };
+
+  /* 混合选区按"还有没划的就全划上，全划上了就全取消"处理，
+     和多数编辑器一致，不会出现按一次反而参差的结果 */
+  api.toggleStrike = function () {
+    var ids = selIds('block');
+    if (!ids.length) return { n: -1, on: false };
+    var anyPlain = false;
+    ids.forEach(function (id) {
+      var b = byId(id);
+      if (b && !b.strike) anyPlain = true;
+    });
+    return { n: api.setStrike(anyPlain), on: anyPlain };
+  };
+
     /* 删除全部选中（多选） */
     api.deleteSelected = function () {
       if (!selCount()) return 0;
@@ -865,6 +905,21 @@
         for (var k = 0; k < lines.length; k++) {
           ctx.fillText(lines[k], x + PAD_X, y + PAD_Y + k * FONT_SIZE * LINE_H);
         }
+        // 删除线：按每行实测宽度画，位置对齐 CSS line-through（基线上方约 .26em）
+        if (b.strike) {
+          ctx.save();
+          ctx.strokeStyle = c.text;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          for (var m = 0; m < lines.length; m++) {
+            var lw = ctx.measureText(lines[m]).width;
+            var ly = y + PAD_Y + m * FONT_SIZE * LINE_H + FONT_SIZE * 0.78;
+            ctx.moveTo(x + PAD_X, ly);
+            ctx.lineTo(x + PAD_X + lw, ly);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
       }
       ctx.restore();
     };
@@ -895,7 +950,10 @@
     api.serialize = function () {
       return {
         blocks: blocks.map(function (b) {
-          return { id: b.id, x: Math.round(b.x), y: Math.round(b.y), text: b.text, color: b.color || 0 };
+          return {
+            id: b.id, x: Math.round(b.x), y: Math.round(b.y),
+            text: b.text, color: b.color || 0, strike: b.strike ? 1 : 0
+          };
         }),
         edges: edges.map(function (e) { return { id: e.id, from: e.from, to: e.to }; })
       };
