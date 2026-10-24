@@ -147,6 +147,18 @@ body.mode-board #nodes { opacity: 1; }
 .node {
   position: absolute;
   transform: translate(-50%, -50%);
+  /* width 必须显式给 max-content，不能留 auto。
+
+     绝对定位 + left 定值 + right/width 都是 auto 时，宽度走 shrink-to-fit，
+     而 CSS 2.1 §10.3.7 里的 available width = 包含块宽度 − left。
+     于是块的 left 越大，可用宽度越小，一旦小于文字的自然宽度就被压到
+     min-content，长句子开始换行、块被拉高。而 left 存的是**场景坐标**，
+     跟它在屏幕上出现在哪儿无关 —— 相机平移过之后场景 x 很容易大于视口宽，
+     块就会莫名其妙地折行；拖动过程中 left 每帧都在变，折行也跟着每帧变。
+
+     实测（视口 1256px，同一句话）：left=900 → 320×65；left=1150 → 106×155；
+     left=1400 → 76×223。加 width:max-content 后三个位置都是 320×65。 */
+  width: max-content;
   pointer-events: auto;
   min-width: 76px;
   max-width: 320px;
